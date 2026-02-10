@@ -35,6 +35,20 @@ interface Holiday {
 export default function AddDuty() {
   const navigate = useNavigate();
   const { isAdmin, user } = useAuthContext();
+  if (!isAdmin) {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Accès refusé</AlertTitle>
+        <AlertDescription>
+          Cette action est réservée aux administrateurs.
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+}
+
   const [loading, setLoading] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);

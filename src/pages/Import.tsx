@@ -30,7 +30,21 @@ interface ImportResult {
 }
 
 export default function Import() {
-  const { user } = useAuthContext();
+  const { user, isAdmin } = useAuthContext();
+  if (!isAdmin) {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Accès refusé</AlertTitle>
+        <AlertDescription>
+          L’import est réservé aux administrateurs.
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+}
+
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<any[]>([]);

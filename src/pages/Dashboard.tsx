@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -328,32 +329,63 @@ export default function Dashboard() {
         <CardHeader>
           <CardTitle className="text-lg">{fr.dashboard.quickActions}</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Link to="/add-duty">
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              {fr.nav.addDuty}
-            </Button>
-          </Link>
-          <Link to="/planning">
-            <Button variant="outline">
-              <Calendar className="mr-2 h-4 w-4" />
-              {fr.nav.planning}
-            </Button>
-          </Link>
-          <Link to="/import">
-            <Button variant="outline">
-              <Upload className="mr-2 h-4 w-4" />
-              {fr.nav.import}
-            </Button>
-          </Link>
-          <Link to="/insights">
-            <Button variant="outline">
-              <TrendingUp className="mr-2 h-4 w-4" />
-              {fr.nav.insights}
-            </Button>
-          </Link>
-        </CardContent>
+       <CardContent className="flex flex-wrap gap-3">
+  {/* Ajouter permanence */}
+  {isAdmin ? (
+    <Link to="/add-duty">
+      <Button>
+        <Plus className="mr-2 h-4 w-4" />
+        {fr.nav.addDuty}
+      </Button>
+    </Link>
+  ) : (
+    <Button
+      onClick={() => toast.error("Action réservée aux administrateurs")}
+      className="opacity-60 cursor-not-allowed"
+      title="Réservé aux administrateurs"
+    >
+      <Plus className="mr-2 h-4 w-4" />
+      {fr.nav.addDuty}
+    </Button>
+  )}
+
+  {/* Planning (toujours autorisé) */}
+  <Link to="/planning">
+    <Button variant="outline">
+      <Calendar className="mr-2 h-4 w-4" />
+      {fr.nav.planning}
+    </Button>
+  </Link>
+
+  {/* Import */}
+  {isAdmin ? (
+    <Link to="/import">
+      <Button variant="outline">
+        <Upload className="mr-2 h-4 w-4" />
+        {fr.nav.import}
+      </Button>
+    </Link>
+  ) : (
+    <Button
+      variant="outline"
+      onClick={() => toast.error("Action réservée aux administrateurs")}
+      className="opacity-60 cursor-not-allowed"
+      title="Réservé aux administrateurs"
+    >
+      <Upload className="mr-2 h-4 w-4" />
+      {fr.nav.import}
+    </Button>
+  )}
+
+  {/* Aide à la décision */}
+  <Link to="/insights">
+    <Button variant="outline">
+      <TrendingUp className="mr-2 h-4 w-4" />
+      {fr.nav.insights}
+    </Button>
+  </Link>
+</CardContent>
+
       </Card>
 
       {/* Upcoming Duties Table */}
@@ -369,11 +401,23 @@ export default function Dashboard() {
             <div className="text-center py-8 text-muted-foreground">
               <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
               <p>{fr.dashboard.noDuties}</p>
-              <Link to="/add-duty">
-                <Button variant="link" className="mt-2">
-                  Ajouter une permanence
-                </Button>
-              </Link>
+              {isAdmin ? (
+  <Link to="/add-duty">
+    <Button variant="link" className="mt-2">
+      Ajouter une permanence
+    </Button>
+  </Link>
+) : (
+  <Button
+    variant="link"
+    className="mt-2 opacity-60 cursor-not-allowed"
+    onClick={() => toast.error('Action réservée aux administrateurs')}
+    title="Réservé aux administrateurs"
+  >
+    Ajouter une permanence
+  </Button>
+)}
+
             </div>
           ) : (
             <Table>

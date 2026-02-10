@@ -179,7 +179,17 @@ export default function Planning() {
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setAutoPlanOpen(true)}>
+          <Button
+  variant="outline"
+  onClick={() => {
+    if (!isAdmin) {
+      toast.error('Action réservée aux administrateurs');
+      return;
+    }
+    setAutoPlanOpen(true);
+  }}
+>
+
             <Wand2 className="h-4 w-4 mr-2" />
             {fr.autoPlan.title}
           </Button>

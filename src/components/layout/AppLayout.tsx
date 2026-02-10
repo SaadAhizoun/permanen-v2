@@ -43,6 +43,7 @@ const navItems = [
   { to: '/history', icon: History, label: fr.nav.history },
 ];
 
+
 const adminItems = [
   { to: '/maintenance', icon: Wrench, label: fr.nav.maintenance },
 ];
@@ -187,16 +188,16 @@ export default function AppLayout() {
 
           {/* User Menu */}
           <div className="flex items-center gap-3">
-            {isAdmin && (
-              <Badge variant="secondary" className="hidden sm:flex bg-primary text-primary-foreground">
-                Admin
-              </Badge>
-            )}
-            {isApproved && !isAdmin && (
-              <Badge variant="secondary" className="hidden sm:flex bg-success text-success-foreground">
-                Approuvé
-              </Badge>
-            )}
+            <Badge
+  variant="secondary"
+  className={cn(
+    "hidden sm:flex",
+    isAdmin ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+  )}
+>
+  {isAdmin ? "Admin" : "Utilisateur"}
+</Badge>
+
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
