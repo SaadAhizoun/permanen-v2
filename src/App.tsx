@@ -19,6 +19,8 @@ import History from "@/pages/History";
 import Maintenance from "@/pages/Maintenance";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import Profile from '@/pages/Profile';
+
 
 const queryClient = new QueryClient();
 
@@ -31,6 +33,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
+            <Route path="/profile" element={<Profile />} />
             <Route path="/awaiting-approval" element={<AwaitingApproval />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />

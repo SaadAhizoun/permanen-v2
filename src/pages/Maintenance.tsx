@@ -72,6 +72,7 @@ export default function Maintenance() {
       supabase
         .from('profiles')
         .select('user_id, full_name')
+        .eq('disabled', false)
     ]);
 
     if (pending.error) throw pending.error;
@@ -85,11 +86,15 @@ export default function Maintenance() {
       if (p.user_id) nameByUserId.set(p.user_id, p.full_name || 'Utilisateur');
     });
 
-    const mergedRoles = (rolesRes.data || []).map((r: any) => ({
-      user_id: r.user_id,
-      role: r.role,
-      profile: { full_name: nameByUserId.get(r.user_id) || 'Utilisateur' },
-    }));
+    const mergedRoles = (rolesRes.data || [])
+  .filter((r: any) => nameByUserId.has(r.user_id))
+  .map((r: any) => ({
+    user_id: r.user_id,
+    role: r.role,
+    profile: { full_name: nameByUserId.get(r.user_id)! },
+  }));
+
+
 
     setUserRoles(mergedRoles as any);
   } catch (e: any) {
@@ -148,6 +153,37 @@ export default function Maintenance() {
       setRolesLoading(false);
     }
   };
+  const deleteUser = async (userId: string) => {
+  if (userId === user?.id) {
+    toast.error("Tu ne peux pas supprimer ton propre compte.");
+    return;
+  }
+
+  if (!window.confirm("Confirmer la désactivation de cet utilisateur ?")) return;
+
+  try {
+    setRolesLoading(true);
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ disabled: true })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    toast.success("Utilisateur désactivé.");
+
+    fetchData();
+
+  } catch (e: any) {
+    console.error(e);
+    toast.error("Erreur lors de la désactivation.");
+  } finally {
+    setRolesLoading(false);
+  }
+};
+
+
 
   const purgeAudit = async () => {
     // safety guard
@@ -303,7 +339,7 @@ export default function Maintenance() {
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Button
                 type="button"
@@ -356,7 +392,7 @@ export default function Maintenance() {
                     className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg border"
                   >
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <div className="font-medium truncate">{name}</div>
                         <Badge variant={r.role === 'admin' ? 'default' : 'secondary'}>
                           {r.role.toUpperCase()}
@@ -370,7 +406,7 @@ export default function Maintenance() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {r.role === 'admin' ? (
                         <Button
                           size="sm"
@@ -390,6 +426,15 @@ export default function Maintenance() {
                           Passer ADMIN
                         </Button>
                       )}
+                      <Button
+  size="sm"
+  variant="destructive"
+  disabled={rolesLoading || isSelf}
+  onClick={() => deleteUser(r.user_id)}
+>
+  Supprimer
+</Button>
+
                     </div>
                   </div>
                 );

@@ -23,12 +23,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
-type Member = { id: string; full_name: string };
 type Duty = {
   duty_date: string;
+  duty_type: string;
   team_member_id: string | null;
   team_member?: { id: string; full_name: string } | null;
 };
+
 
 const weekdayLabels = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'] as const;
 
@@ -78,7 +79,8 @@ export default function Insights() {
 
       const { data: dutiesData, error: dutiesErr } = await supabase
         .from('duty_entries')
-        .select('duty_date, team_member_id, team_member:team_members(id, full_name)')
+.select('duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)')
+
         .gte('duty_date', format(sixMonthsAgo, 'yyyy-MM-dd'));
 
       if (dutiesErr) throw dutiesErr;
@@ -173,13 +175,21 @@ export default function Insights() {
 
       const dt = new Date(d.duty_date);
       const dayKey = format(dt, 'yyyy-MM-dd');
-      const isHoliday = holidayDatesSet.has(dayKey);
-
-      const wd = dt.getDay(); // 0..6
+      const wd = dt.getDay();
       const isWeekend = wd === 0 || wd === 6;
+      
+const isHolidayFromDB = d.duty_type === 'holiday';
+const isOfficialHoliday = holidayDatesSet.has(dayKey);
 
-      if (isHoliday) stats[mid].holiday += 1;
-      else stats[mid].normal += 1;
+// FINAL holiday rule:
+if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
+  stats[mid].holiday += 1;
+} else {
+  stats[mid].normal += 1;
+}
+
+
+      
 
       if (isWeekend) stats[mid].weekend += 1;
       else stats[mid].weekday += 1;

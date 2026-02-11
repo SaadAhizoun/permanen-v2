@@ -217,10 +217,11 @@ export default function AppLayout() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/settings')}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  {fr.nav.settings}
-                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/profile')}>
+  <Settings className="mr-2 h-4 w-4" />
+  Profil / Mot de passe
+</DropdownMenuItem>
+
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut} className="text-destructive focus:text-destructive">
                   <LogOut className="mr-2 h-4 w-4" />

@@ -202,6 +202,7 @@ const toggleWeekday = (wd: number) => {
 const refreshRecommendations = async () => {
   if (!dutyDate) return;
   setLoadingRecs(true);
+
   try {
     const dates = generateDates(dutyDate);
     if (dates.length === 0) {
@@ -222,21 +223,37 @@ const refreshRecommendations = async () => {
 
     const counts = new Map<string, number>();
     for (const m of teamMembers) counts.set(m.id, 0);
+
     for (const row of duties ?? []) {
-      if (row.team_member_id) counts.set(row.team_member_id, (counts.get(row.team_member_id) ?? 0) + 1);
+      if (row.team_member_id) {
+        counts.set(
+          row.team_member_id,
+          (counts.get(row.team_member_id) ?? 0) + 1
+        );
+      }
     }
 
-    const sorted = [...counts.entries()]
-      .sort((a,b) => (a[1] - b[1]) || a[0].localeCompare(b[0]))
-      .map(([id]) => id);
+    const activeIds = teamMembers.map(m => m.id);
 
-    setRecommendedMemberIds(sorted.slice(0, 5));
+    // We don't limit to 5 anymore
+    const sorted = activeIds.sort(
+      (a, b) =>
+        (counts.get(a)! - counts.get(b)!) ||
+        a.localeCompare(b)
+    );
+
+    const generatedDates  = generateDates(dutyDate);
+const needed = generatedDates.length * peoplePerDay;
+
+setRecommendedMemberIds(sorted.slice(0, needed));
+
   } catch (e) {
     console.error(e);
   } finally {
     setLoadingRecs(false);
   }
 };
+
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -275,59 +292,100 @@ const refreshRecommendations = async () => {
 
     // DAY mode: insert one
     if (mode === 'day') {
-      const { error } = await supabase.from('duty_entries').insert({
-        duty_date: toDateStr(dutyDate),
-        duty_type: dutyType,
-        team_member_id: selectedMember,
-        notes: notes || null,
-        created_by: user?.id,
-      });
-      if (error) throw error;
+  const dateObj = new Date(dutyDate);
+  const day = dateObj.getDay();
+
+  const autoType = (day === 0 || day === 6)
+    ? 'holiday'
+    : dutyType;
+
+  const { error } = await supabase.from('duty_entries').insert({
+    duty_date: toDateStr(dutyDate),
+    duty_type: autoType,
+    team_member_id: selectedMember,
+    notes: notes || null,
+    created_by: user?.id,
+  });
+
+  if (error) throw error;
 
       toast.success('Permanence ajoutée avec succès');
       navigate('/planning');
       return;
     }
 
-    // WEEK/MONTH mode: auto-assign using recommendations (least assigned)
-    const activeMemberIds = teamMembers.map(m => m.id);
-    if (activeMemberIds.length === 0) {
-      toast.error("Aucun membre actif dans l'équipe.");
-      return;
-    }
+    // WEEK/MONTH mode: true smart rotation
 
-    // Build inserts
-    const inserts: any[] = [];
-    for (const d of dates) {
-      const dayStr = toDateStr(d);
+const activeMemberIds = teamMembers.map(m => m.id);
 
-      // if holiday and user not admin => blocked already by generateDates when excludeHolidays=true
-      // Still: if excludeHolidays=false and not admin, block
-      if (!isAdmin && !excludeHolidays && isHolidayDate(d)) {
-        continue;
-      }
+if (activeMemberIds.length === 0) {
+  toast.error("Aucun membre actif dans l'équipe.");
+  return;
+}
 
-      // pick N members (simple deterministic)
-      // start from recommended list then fill from alphabetical
-      const preferred = recommendedMemberIds.filter(id => activeMemberIds.includes(id));
-      const fallback = activeMemberIds.filter(id => !preferred.includes(id)).sort();
+// build initial load counts
+const start = toDateStr(new Date(Math.min(...dates.map(d => d.getTime()))));
+const end = toDateStr(new Date(Math.max(...dates.map(d => d.getTime()))));
 
-      const chosen: string[] = [];
-      for (const id of [...preferred, ...fallback]) {
-        if (chosen.length >= peoplePerDay) break;
-        chosen.push(id);
-      }
+const { data: existing, error: loadErr } = await supabase
+  .from('duty_entries')
+  .select('team_member_id')
+  .gte('duty_date', start)
+  .lte('duty_date', end);
 
-      for (const memberId of chosen) {
-        inserts.push({
-          duty_date: dayStr,
-          duty_type: dutyType,
-          team_member_id: memberId,
-          notes: notes || null,
-          created_by: user?.id,
-        });
-      }
-    }
+if (loadErr) throw loadErr;
+
+const loadCounts = new Map<string, number>();
+for (const id of activeMemberIds) loadCounts.set(id, 0);
+
+for (const row of existing ?? []) {
+  if (row.team_member_id) {
+    loadCounts.set(
+      row.team_member_id,
+      (loadCounts.get(row.team_member_id) ?? 0) + 1
+    );
+  }
+}
+
+const inserts: any[] = [];
+
+for (const d of dates) {
+  const dayStr = toDateStr(d);
+  const weekday = d.getDay();
+
+  const computedType =
+    (weekday === 0 || weekday === 6)
+      ? 'holiday'
+      : 'normal';
+
+  // sort dynamically per day
+  const sorted = [...activeMemberIds].sort(
+    (a, b) =>
+      (loadCounts.get(a)! - loadCounts.get(b)!) ||
+      a.localeCompare(b)
+  );
+
+  const chosen: string[] = [];
+
+  for (const id of sorted) {
+    if (chosen.length >= peoplePerDay) break;
+    chosen.push(id);
+    loadCounts.set(id, loadCounts.get(id)! + 1);
+  }
+
+  for (const memberId of chosen) {
+    inserts.push({
+      duty_date: dayStr,
+      duty_type: computedType,
+      team_member_id: memberId,
+      notes: notes || null,
+      created_by: user?.id,
+    });
+  }
+}
+
+
+
 
     if (inserts.length === 0) {
       toast.error("Rien à insérer (filtres trop stricts).");
