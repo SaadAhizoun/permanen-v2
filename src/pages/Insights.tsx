@@ -23,13 +23,19 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
+type Member = {
+  id: string;
+  full_name: string;
+  // NEW credits (from team_members table)
+  initial_credit_normal?: number | null;
+  initial_credit_holiday?: number | null;
+};
+
 type Duty = {
   duty_date: string;
-  duty_type: string;
   team_member_id: string | null;
   team_member?: { id: string; full_name: string } | null;
 };
-
 
 const weekdayLabels = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'] as const;
 
@@ -60,6 +66,7 @@ export default function Insights() {
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchData = async () => {
@@ -69,22 +76,24 @@ export default function Insights() {
       const now = new Date();
       const sixMonthsAgo = subMonths(now, 6);
 
+      // Members (include credits)
       const { data: membersData, error: membersErr } = await supabase
         .from('team_members')
-        .select('id, full_name')
+        .select('id, full_name, initial_credit_normal, initial_credit_holiday')
         .eq('active', true)
         .order('full_name', { ascending: true });
 
       if (membersErr) throw membersErr;
 
+      // Duties in last 6 months
       const { data: dutiesData, error: dutiesErr } = await supabase
         .from('duty_entries')
-.select('duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)')
-
+        .select('duty_date, team_member_id, team_member:team_members(id, full_name)')
         .gte('duty_date', format(sixMonthsAgo, 'yyyy-MM-dd'));
 
       if (dutiesErr) throw dutiesErr;
 
+      // Holidays
       const { data: holidaysData, error: holidaysErr } = await supabase
         .from('holidays')
         .select('date');
@@ -98,12 +107,13 @@ export default function Insights() {
           .map((d: string) => format(new Date(d), 'yyyy-MM-dd'))
       );
 
-      setMembers(membersData || []);
-      setDuties((dutiesData as any) || []);
+      const safeMembers = (membersData || []) as Member[];
+      setMembers(safeMembers);
+      setDuties(((dutiesData || []) as any) || []);
       setHolidayDatesSet(holidaySet);
 
       // default selection: all (UX note: if empty => all)
-      setSelectedMemberIds((membersData || []).map((m: any) => m.id));
+      setSelectedMemberIds(safeMembers.map((m) => m.id));
     } catch (e) {
       console.error(e);
     } finally {
@@ -137,7 +147,7 @@ export default function Insights() {
     });
   }, [duties, selectedMemberIds]);
 
-  // Per-member stats
+  // Per-member stats (BASE credits + duties in period)
   const perMemberStats = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -155,41 +165,38 @@ export default function Insights() {
       }
     > = {};
 
+    // init with BASE credits
     members.forEach((m) => {
-      if (allowAll || selectedSet.has(m.id)) {
-        stats[m.id] = {
-          memberId: m.id,
-          name: m.full_name,
-          normal: 0,
-          holiday: 0,
-          total: 0,
-          weekend: 0,
-          weekday: 0,
-        };
-      }
+      if (!allowAll && !selectedSet.has(m.id)) return;
+
+      const baseNormal = Number(m.initial_credit_normal ?? 0) || 0;
+      const baseHoliday = Number(m.initial_credit_holiday ?? 0) || 0;
+
+      stats[m.id] = {
+        memberId: m.id,
+        name: m.full_name,
+        normal: baseNormal,
+        holiday: baseHoliday,
+        total: baseNormal + baseHoliday,
+        weekend: 0,
+        weekday: 0,
+      };
     });
 
+    // add duties from last 6 months
     filteredDuties.forEach((d) => {
       const mid = d.team_member_id;
       if (!mid || !stats[mid]) return;
 
       const dt = new Date(d.duty_date);
       const dayKey = format(dt, 'yyyy-MM-dd');
-      const wd = dt.getDay();
+      const isHoliday = holidayDatesSet.has(dayKey);
+
+      const wd = dt.getDay(); // 0..6
       const isWeekend = wd === 0 || wd === 6;
-      
-const isHolidayFromDB = d.duty_type === 'holiday';
-const isOfficialHoliday = holidayDatesSet.has(dayKey);
 
-// FINAL holiday rule:
-if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
-  stats[mid].holiday += 1;
-} else {
-  stats[mid].normal += 1;
-}
-
-
-      
+      if (isHoliday) stats[mid].holiday += 1;
+      else stats[mid].normal += 1;
 
       if (isWeekend) stats[mid].weekend += 1;
       else stats[mid].weekday += 1;
@@ -366,9 +373,7 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
     const recs: string[] = [];
 
     if (fairnessGap >= 6) {
-      recs.push(
-        `Déséquilibre important : écart de ${fairnessGap}. Priorise les membres les moins chargés.`
-      );
+      recs.push(`Déséquilibre important : écart de ${fairnessGap}. Priorise les membres les moins chargés.`);
     } else {
       recs.push(`Équilibre correct : écart de ${fairnessGap}. Continue sur la même logique.`);
     }
@@ -472,52 +477,22 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="py-5">
-            <div className="text-sm text-muted-foreground">Total permanences</div>
-            <div className="text-3xl font-bold mt-1">{kpis.total}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-5">
-            <div className="text-sm text-muted-foreground">Moyenne / membre</div>
-            <div className="text-3xl font-bold mt-1">{kpis.avg}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-5">
-            <div className="text-sm text-muted-foreground">Jours fériés</div>
-            <div className="text-3xl font-bold mt-1">{kpis.holiday}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-5">
-            <div className="text-sm text-muted-foreground">Week-end</div>
-            <div className="text-3xl font-bold mt-1">{kpis.weekend}</div>
-          </CardContent>
-        </Card>
+        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Total permanences</div><div className="text-3xl font-bold mt-1">{kpis.total}</div></CardContent></Card>
+        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Moyenne / membre</div><div className="text-3xl font-bold mt-1">{kpis.avg}</div></CardContent></Card>
+        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Jours fériés</div><div className="text-3xl font-bold mt-1">{kpis.holiday}</div></CardContent></Card>
+        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Week-end</div><div className="text-3xl font-bold mt-1">{kpis.weekend}</div></CardContent></Card>
       </div>
 
       {/* Distribution + fairness */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>Répartition par membre</CardTitle>
-          </CardHeader>
-
+          <CardHeader><CardTitle>Répartition par membre</CardTitle></CardHeader>
           <CardContent>
             <div className="w-full overflow-x-auto">
               <div className="min-w-[1400px] h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={distributionData}>
-                    <XAxis
-                      dataKey="name"
-                      interval={0}
-                      angle={-35}
-                      textAnchor="end"
-                      height={80}
-                      fontSize={12}
-                    />
+                    <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
                     <YAxis fontSize={12} />
                     <Tooltip
                       formatter={(value: any) => [value, 'Total']}
@@ -564,27 +539,13 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Équité (simple)</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>Équité (simple)</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-center">
-              <div>
-                <div className="text-2xl font-bold">{fairness.max}</div>
-                <div className="text-sm text-muted-foreground">Plus chargé</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold">{fairness.min}</div>
-                <div className="text-sm text-muted-foreground">Moins chargé</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold">{fairness.avg}</div>
-                <div className="text-sm text-muted-foreground">Moyenne / membre</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold">{fairnessGap}</div>
-                <div className="text-sm text-muted-foreground">Écart (max-min)</div>
-              </div>
+              <div><div className="text-2xl font-bold">{fairness.max}</div><div className="text-sm text-muted-foreground">Plus chargé</div></div>
+              <div><div className="text-2xl font-bold">{fairness.min}</div><div className="text-sm text-muted-foreground">Moins chargé</div></div>
+              <div><div className="text-2xl font-bold">{fairness.avg}</div><div className="text-sm text-muted-foreground">Moyenne / membre</div></div>
+              <div><div className="text-2xl font-bold">{fairnessGap}</div><div className="text-sm text-muted-foreground">Écart (max-min)</div></div>
             </div>
 
             <div className="pt-4 border-t space-y-3">
@@ -593,7 +554,6 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
                 <Badge className={fairnessVerdict.cls}>{fairnessVerdict.label}</Badge>
               </div>
 
-              {/* simple status bar */}
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div
                   className={cn(
@@ -602,9 +562,7 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
                     fairnessGap > 2 && fairnessGap <= 5 && "bg-yellow-500",
                     fairnessGap > 5 && "bg-red-600"
                   )}
-                  style={{
-                    width: `${Math.min(100, Math.max(10, (fairnessGap / 10) * 100))}%`,
-                  }}
+                  style={{ width: `${Math.min(100, Math.max(10, (fairnessGap / 10) * 100))}%` }}
                 />
               </div>
 
@@ -672,9 +630,7 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
 
       {/* Matrix */}
       <Card>
-        <CardHeader>
-          <CardTitle>Matrice — Membre × Jour de semaine</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Matrice — Membre × Jour de semaine</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
@@ -737,9 +693,7 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
 
       {/* Totals table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Totaux (Normal / Férié)</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Totaux (Normal / Férié)</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
@@ -785,9 +739,7 @@ if (isHolidayFromDB || isOfficialHoliday || isWeekend) {
 
       {/* Days since last duty */}
       <Card>
-        <CardHeader>
-          <CardTitle>Days since last duty</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Days since last duty</CardTitle></CardHeader>
         <CardContent>
           <div className="w-full overflow-x-auto">
             <div className="min-w-[1400px] h-72">
