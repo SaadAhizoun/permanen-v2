@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { fr } from '@/lib/i18n';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,6 +13,10 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+import { Download, FileSpreadsheet, FileText } from 'lucide-react';
+
 import {
   BarChart,
   Bar,
@@ -22,17 +25,9 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { format, subMonths, differenceInCalendarDays } from 'date-fns';
+
+import { format, differenceInCalendarDays } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Download, FileSpreadsheet, FileText } from 'lucide-react';
 
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -54,6 +49,14 @@ type Duty = {
 };
 
 const weekdayLabels = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'] as const;
+
+const LABELS = {
+  solde: 'Solde initial',
+  period: 'Permanences sur la période',
+  total: 'Total global (Solde + Période)',
+  normal: 'Jours normaux',
+  holiday: 'Jours fériés',
+};
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -81,6 +84,15 @@ function clampDateStr(d: string) {
   return (d || '').trim().slice(0, 10);
 }
 
+function headerCell(title: string, subtitle?: string) {
+  return (
+    <div className="flex flex-col items-end">
+      <div className="font-medium leading-4">{title}</div>
+      {subtitle ? <div className="text-[10px] text-muted-foreground leading-4">{subtitle}</div> : null}
+    </div>
+  );
+}
+
 export default function Insights() {
   const [loading, setLoading] = useState(true);
 
@@ -92,6 +104,7 @@ export default function Insights() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
   const [tableSearch, setTableSearch] = useState('');
   const [matrixSearch, setMatrixSearch] = useState('');
   const [matrixOnlyActive, setMatrixOnlyActive] = useState(false);
@@ -111,17 +124,13 @@ export default function Insights() {
   const refChartHoliday = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchData = async () => {
     try {
       setLoading(true);
-
-      const now = new Date();
-      const sixMonthsAgo = subMonths(now, 6);
-      // const sixMonthsStr = format(sixMonthsAgo, 'yyyy-MM-dd'); // (optionnel)
 
       const { data: membersData, error: membersErr } = await supabase
         .from('team_members')
@@ -157,8 +166,7 @@ export default function Insights() {
       setHolidayDatesSet(holidaySet);
 
       // default selection: all members
-      const allIds = m.map((x) => x.id);
-      setSelectedMemberIds(allIds);
+      setSelectedMemberIds(m.map((x) => x.id));
 
       // default export range = min/max duty_date we have
       const allDutyDates = d.map((x) => clampDateStr(x.duty_date)).filter(Boolean);
@@ -168,7 +176,7 @@ export default function Insights() {
 
       const maxD = allDutyDates.length
         ? allDutyDates.reduce((a, b) => (a > b ? a : b))
-        : format(now, 'yyyy-MM-dd');
+        : format(new Date(), 'yyyy-MM-dd');
 
       setExportFrom(minD);
       setExportTo(maxD);
@@ -225,10 +233,10 @@ export default function Insights() {
   const COUNT_WEEKEND_AS_HOLIDAY = true;
 
   /**
-   * ✅ NEW: stats richer
+   * ✅ stats rich & clean:
    * - base* = solde initial
-   * - period* = permanences sur la période
-   * - normal/holiday/total = base + period (donc "totalité")
+   * - period* = duties within selected period
+   * - total = base + period
    */
   const perMemberStats = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
@@ -248,16 +256,15 @@ export default function Insights() {
         periodHoliday: number;
         periodTotal: number;
 
-        normal: number;  // base + period
-        holiday: number; // base + period
-        total: number;   // base + period
+        normal: number;
+        holiday: number;
+        total: number;
 
-        weekend: number;
-        weekday: number;
+        weekendPeriod: number;
+        weekdayPeriod: number;
       }
     > = {};
 
-    // init with base credits (solde)
     for (const m of members) {
       if (!allowAll && !selectedSet.has(m.id)) continue;
 
@@ -281,12 +288,11 @@ export default function Insights() {
         holiday: baseHoliday,
         total: baseTotal,
 
-        weekend: 0,
-        weekday: 0,
+        weekendPeriod: 0,
+        weekdayPeriod: 0,
       };
     }
 
-    // add duties from export period
     for (const d of exportDuties) {
       const mid = d.team_member_id;
       if (!mid || !stats[mid]) continue;
@@ -299,9 +305,7 @@ export default function Insights() {
       const isWeekend = isWeekendByDayIndex(wd);
 
       const isOfficialHoliday = holidayDatesSet.has(dayKey);
-      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY
-        ? (isOfficialHoliday || isWeekend)
-        : isOfficialHoliday;
+      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY ? (isOfficialHoliday || isWeekend) : isOfficialHoliday;
 
       if (isHoliday) {
         stats[mid].periodHoliday += 1;
@@ -314,22 +318,21 @@ export default function Insights() {
       stats[mid].periodTotal += 1;
       stats[mid].total += 1;
 
-      if (isWeekend) stats[mid].weekend += 1;
-      else stats[mid].weekday += 1;
+      if (isWeekend) stats[mid].weekendPeriod += 1;
+      else stats[mid].weekdayPeriod += 1;
     }
 
     return Object.values(stats);
   }, [exportDuties, members, selectedMemberIds, holidayDatesSet]);
 
-  // ✅ KPIs reflect "totalité" (solde + période)
   const kpis = useMemo(() => {
     const total = perMemberStats.reduce((s, m) => s + m.total, 0);
     const holiday = perMemberStats.reduce((s, m) => s + m.holiday, 0);
     const normal = perMemberStats.reduce((s, m) => s + m.normal, 0);
-    const weekend = perMemberStats.reduce((s, m) => s + m.weekend, 0);
+    const weekendPeriod = perMemberStats.reduce((s, m) => s + m.weekendPeriod, 0);
+
     const avg = perMemberStats.length ? total / perMemberStats.length : 0;
 
-    // bonus: visibles dans UI si tu veux
     const baseTotal = perMemberStats.reduce((s, m) => s + m.baseTotal, 0);
     const periodTotal = perMemberStats.reduce((s, m) => s + m.periodTotal, 0);
 
@@ -337,7 +340,7 @@ export default function Insights() {
       total,
       normal,
       holiday,
-      weekend,
+      weekendPeriod,
       avg: Math.round(avg * 10) / 10,
       baseTotal,
       periodTotal,
@@ -350,7 +353,7 @@ export default function Insights() {
         memberId: m.memberId,
         name: shortName(m.name),
         fullName: m.name,
-        total: m.total, // ✅ total global (solde + période)
+        total: m.total,
         baseTotal: m.baseTotal,
         periodTotal: m.periodTotal,
       }))
@@ -363,7 +366,7 @@ export default function Insights() {
         memberId: m.memberId,
         name: shortName(m.name),
         fullName: m.name,
-        count: m.normal, // ✅ normal global
+        count: m.normal,
         base: m.baseNormal,
         period: m.periodNormal,
       }))
@@ -376,20 +379,15 @@ export default function Insights() {
         memberId: m.memberId,
         name: shortName(m.name),
         fullName: m.name,
-        count: m.holiday, // ✅ férié global
+        count: m.holiday,
         base: m.baseHoliday,
         period: m.periodHoliday,
       }))
       .sort((a, b) => b.count - a.count);
   }, [perMemberStats]);
 
-  const top3Most = useMemo(() => {
-    return [...perMemberStats].sort((a, b) => b.total - a.total).slice(0, 3);
-  }, [perMemberStats]);
-
-  const top3Least = useMemo(() => {
-    return [...perMemberStats].sort((a, b) => a.total - b.total).slice(0, 3);
-  }, [perMemberStats]);
+  const top3Most = useMemo(() => [...perMemberStats].sort((a, b) => b.total - a.total).slice(0, 3), [perMemberStats]);
+  const top3Least = useMemo(() => [...perMemberStats].sort((a, b) => a.total - b.total).slice(0, 3), [perMemberStats]);
 
   const fairness = useMemo(() => {
     const counts = perMemberStats.map((m) => m.total);
@@ -419,12 +417,7 @@ export default function Insights() {
   }, [perMemberStats, tableSearch, tableAsc]);
 
   /**
-   * ✅ NEW: weekday matrix includes solde columns
-   * we show:
-   * - Solde N/F/T
-   * - counts per weekday (period only)
-   * - Total période
-   * - Total global (solde + période)
+   * ✅ Matrix for PERIOD by weekday + adds Solde columns + Total global
    */
   const weekdayMatrix = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
@@ -445,24 +438,30 @@ export default function Insights() {
     const matrix: Array<{
       memberId: string;
       name: string;
-      soldeNormal: number;
-      soldeHoliday: number;
-      soldeTotal: number;
-      counts: number[];     // period counts per weekday
-      periodTotal: number;  // sum(counts)
-      totalGlobal: number;  // solde + period
+
+      baseNormal: number;
+      baseHoliday: number;
+      baseTotal: number;
+
+      weekdayCountsPeriod: number[];
+      periodTotal: number;
+      totalGlobal: number;
     }> = [];
 
     for (const m of members) {
       if (!allowAll && !selectedSet.has(m.id)) continue;
+
       const base = baseById.get(m.id) || { baseNormal: 0, baseHoliday: 0, baseTotal: 0, totalGlobal: 0 };
+
       matrix.push({
         memberId: m.id,
         name: m.full_name,
-        soldeNormal: base.baseNormal,
-        soldeHoliday: base.baseHoliday,
-        soldeTotal: base.baseTotal,
-        counts: Array(7).fill(0),
+
+        baseNormal: base.baseNormal,
+        baseHoliday: base.baseHoliday,
+        baseTotal: base.baseTotal,
+
+        weekdayCountsPeriod: Array(7).fill(0),
         periodTotal: 0,
         totalGlobal: base.totalGlobal,
       });
@@ -481,20 +480,53 @@ export default function Insights() {
       if (!dayKey) continue;
 
       const dt = parseDateOnlyUTC(dayKey);
-      matrix[idx].counts[dt.getUTCDay()] += 1;
+      matrix[idx].weekdayCountsPeriod[dt.getUTCDay()] += 1;
     }
 
     for (const row of matrix) {
-      row.periodTotal = row.counts.reduce((s, x) => s + x, 0);
+      row.periodTotal = row.weekdayCountsPeriod.reduce((s, x) => s + x, 0);
     }
 
-    // sort by totalGlobal desc (nice)
     matrix.sort((a, b) => b.totalGlobal - a.totalGlobal);
-
     return matrix;
   }, [exportDuties, members, selectedMemberIds, perMemberStats]);
 
-  // ---- Days since last duty (3 graphs) ----
+  // ---------- Days since last (3 graphs) ----------
+  const daysSinceLastDutyData = useMemo(() => {
+    const now = new Date();
+    const lastDateByMember = new Map<string, Date>();
+
+    for (const d of exportDuties) {
+      const mid = d.team_member_id;
+      if (!mid) continue;
+
+      const dayKey = clampDateStr(d.duty_date);
+      if (!dayKey) continue;
+
+      const dt = parseDateOnlyUTC(dayKey);
+      const prev = lastDateByMember.get(mid);
+      if (!prev || dt > prev) lastDateByMember.set(mid, dt);
+    }
+
+    const allowAll = selectedMemberIds.length === 0;
+    const selectedSet = new Set(selectedMemberIds);
+
+    return members
+      .filter((m) => allowAll || selectedSet.has(m.id))
+      .map((m) => {
+        const last = lastDateByMember.get(m.id) || null;
+        const days = last ? Math.max(0, differenceInCalendarDays(now, last)) : null;
+        return {
+          memberId: m.id,
+          name: shortName(m.full_name),
+          fullName: m.full_name,
+          days: days ?? 9999,
+          hasValue: days !== null,
+        };
+      })
+      .sort((a, b) => b.days - a.days);
+  }, [exportDuties, members, selectedMemberIds]);
+
   const daysSinceLastNormalDutyData = useMemo(() => {
     const now = new Date();
     const lastDateByMember = new Map<string, Date>();
@@ -510,7 +542,7 @@ export default function Insights() {
       const isOfficialHoliday = holidayDatesSet.has(dayKey);
       const isHoliday = COUNT_WEEKEND_AS_HOLIDAY ? (isOfficialHoliday || isWeekend) : isOfficialHoliday;
 
-      if (isHoliday) return; // only normal
+      if (isHoliday) return;
 
       const prev = lastDateByMember.get(mid);
       if (!prev || dt > prev) lastDateByMember.set(mid, dt);
@@ -547,7 +579,7 @@ export default function Insights() {
       const isOfficialHoliday = holidayDatesSet.has(dayKey);
       const isHoliday = COUNT_WEEKEND_AS_HOLIDAY ? (isOfficialHoliday || isWeekend) : isOfficialHoliday;
 
-      if (!isHoliday) return; // only holiday
+      if (!isHoliday) return;
 
       const prev = lastDateByMember.get(mid);
       if (!prev || dt > prev) lastDateByMember.set(mid, dt);
@@ -569,41 +601,6 @@ export default function Insights() {
       .sort((a, b) => b.days - a.days);
   }, [exportDuties, members, holidayDatesSet, selectedMemberIds]);
 
-  const daysSinceLastDutyData = useMemo(() => {
-    const now = new Date();
-    const lastDateByMember = new Map<string, Date>();
-
-    for (const d of exportDuties) {
-      const mid = d.team_member_id;
-      if (!mid) continue;
-
-      const dayKey = clampDateStr(d.duty_date);
-      if (!dayKey) continue;
-
-      const dt = parseDateOnlyUTC(dayKey);
-      const prev = lastDateByMember.get(mid);
-      if (!prev || dt > prev) lastDateByMember.set(mid, dt);
-    }
-
-    const allowAll = selectedMemberIds.length === 0;
-    const selectedSet = new Set(selectedMemberIds);
-
-    return members
-      .filter((m) => allowAll || selectedSet.has(m.id))
-      .map((m) => {
-        const last = lastDateByMember.get(m.id) || null;
-        const days = last ? Math.max(0, differenceInCalendarDays(now, last)) : null;
-        return {
-          memberId: m.id,
-          name: shortName(m.full_name),
-          fullName: m.full_name,
-          days: days ?? 9999,
-          hasValue: days !== null,
-        };
-      })
-      .sort((a, b) => b.days - a.days);
-  }, [exportDuties, members, selectedMemberIds]);
-
   const recommendations = useMemo(() => {
     if (perMemberStats.length === 0) return [];
     const avg = fairness.avg || 0;
@@ -614,21 +611,17 @@ export default function Insights() {
 
     const recs: string[] = [];
 
-    if (fairnessGap >= 6)
-      recs.push(`Déséquilibre important : écart de ${fairnessGap}. Priorise les membres les moins chargés.`);
-    else
-      recs.push(`Équilibre correct : écart de ${fairnessGap}. Continue sur la même logique.`);
+    if (fairnessGap >= 6) recs.push(`Déséquilibre important : écart de ${fairnessGap}. Priorise les membres les moins chargés.`);
+    else recs.push(`Équilibre correct : écart de ${fairnessGap}. Continue sur la même logique.`);
 
-    recs.push(`Prochaine rotation suggérée (moins chargés) : ${least.map((m) => shortName(m.name)).join(', ')}.`);
-    if (most[0]?.total >= avg + 3)
-      recs.push(`Réduire la charge de : ${most.map((m) => shortName(m.name)).join(', ')} (au-dessus de la moyenne).`);
+    recs.push(`Rotation suggérée (moins chargés) : ${least.map((m) => shortName(m.name)).join(', ')}.`);
+    if (most[0]?.total >= avg + 3) recs.push(`Réduire la charge de : ${most.map((m) => shortName(m.name)).join(', ')} (au-dessus de la moyenne).`);
 
-    // ✅ bonus: transparence solde vs période
-    recs.push(`Total global = Solde initial + Permanences sur période.`);
-    recs.push(`Solde total (tous membres): ${kpis.baseTotal} • Période: ${kpis.periodTotal}.`);
+    recs.push(`${LABELS.total} = ${LABELS.solde} + ${LABELS.period}.`);
+    recs.push(`Totaux: Solde = ${kpis.baseTotal} • Période = ${kpis.periodTotal} • Global = ${kpis.total}.`);
 
     return recs;
-  }, [perMemberStats, fairness.avg, fairnessGap, kpis.baseTotal, kpis.periodTotal]);
+  }, [perMemberStats, fairness.avg, fairnessGap, kpis.baseTotal, kpis.periodTotal, kpis.total]);
 
   // -----------------------
   // EXPORTS
@@ -639,48 +632,44 @@ export default function Insights() {
     const wb = XLSX.utils.book_new();
     const generatedAt = format(new Date(), 'dd/MM/yyyy HH:mm', { locale: frLocale });
 
-    // SHEET 1: Résumé
+    // Sheet 1: Summary
     const summaryRows = [
       ['RAPPORT PERMANENCES'],
       ['Période', `${clampDateStr(exportFrom) || '…'} → ${clampDateStr(exportTo) || '…'}`],
       ['Généré le', generatedAt],
       ['Membres inclus', selectedCountLabel],
       [],
-      ['INDICATEURS (Totalité = Solde + Période)'],
-      ['Total global', kpis.total],
-      ['Normal global', kpis.normal],
-      ['Férié global', kpis.holiday],
-      ['Week-end (période)', kpis.weekend],
-      ['Moyenne / membre', kpis.avg],
-      [],
-      ['DÉCOMPOSITION'],
-      ['Solde total', kpis.baseTotal],
-      ['Permanences période', kpis.periodTotal],
+      ['INDICATEURS'],
+      [LABELS.total, kpis.total],
+      [`${LABELS.solde} (Total)`, kpis.baseTotal],
+      [`${LABELS.period} (Total)`, kpis.periodTotal],
+      ['Week-end (période)', kpis.weekendPeriod],
+      ['Moyenne / membre (global)', kpis.avg],
       [],
       ['RECOMMANDATIONS'],
       ...recommendations.map((r) => [r]),
     ];
 
     const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
-    ws1['!cols'] = [{ wch: 28 }, { wch: 80 }];
+    ws1['!cols'] = [{ wch: 30 }, { wch: 90 }];
     ws1['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
     XLSX.utils.book_append_sheet(wb, ws1, 'Résumé');
 
-    // SHEET 2: Totaux (avec solde + période)
+    // Sheet 2: Totals (clear labels)
     const totalsHeader = [[
       'Membre',
-      'Solde Normal',
-      'Solde Férié',
-      'Solde Total',
-      'Période Normal',
-      'Période Férié',
-      'Période Total',
-      'Total Global',
+      'Solde initial — Normal',
+      'Solde initial — Férié',
+      'Solde initial — Total',
+      'Période — Normal',
+      'Période — Férié',
+      'Période — Total',
+      'Total global',
       'Week-end (période)',
       'Semaine (période)',
     ]];
 
-    const totalsRows = perMemberStats.map((m) => [
+    const totalsRows = perMemberStats.map((m) => ([
       m.name,
       m.baseNormal,
       m.baseHoliday,
@@ -689,56 +678,63 @@ export default function Insights() {
       m.periodHoliday,
       m.periodTotal,
       m.total,
-      m.weekend,
-      m.weekday,
-    ]);
+      m.weekendPeriod,
+      m.weekdayPeriod,
+    ]));
 
     const ws2 = XLSX.utils.aoa_to_sheet([...totalsHeader, ...totalsRows]);
     ws2['!cols'] = [
       { wch: 28 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
       { wch: 14 },
       { wch: 14 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 16 },
       { wch: 16 },
     ];
     XLSX.utils.book_append_sheet(wb, ws2, 'Totaux');
 
-    // SHEET 3: Matrice (avec solde)
+    // Sheet 3: Matrix (clear labels)
     if (exportIncludeMatrix) {
       const matrixHeader = [[
         'Membre',
-        'Solde N',
-        'Solde F',
-        'Solde T',
-        ...weekdayLabels,
+        'Solde initial — Normal',
+        'Solde initial — Férié',
+        'Solde initial — Total',
+        ...weekdayLabels.map((d) => `${d} (période)`),
         'Total période',
         'Total global',
       ]];
 
       const matrixRows = weekdayMatrix.map((row) => ([
         row.name,
-        row.soldeNormal,
-        row.soldeHoliday,
-        row.soldeTotal,
-        ...row.counts,
+        row.baseNormal,
+        row.baseHoliday,
+        row.baseTotal,
+        ...row.weekdayCountsPeriod,
         row.periodTotal,
         row.totalGlobal,
       ]));
 
       const ws3 = XLSX.utils.aoa_to_sheet([...matrixHeader, ...matrixRows]);
-      ws3['!cols'] = [{ wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, ...Array(7).fill({ wch: 8 }), { wch: 12 }, { wch: 12 }];
+      ws3['!cols'] = [
+        { wch: 28 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        ...Array(7).fill({ wch: 12 }),
+        { wch: 14 },
+        { wch: 14 },
+      ];
       XLSX.utils.book_append_sheet(wb, ws3, 'Matrice');
     }
 
-    // SHEET 4: Données brutes
+    // Sheet 4: Raw
     if (exportIncludeRaw) {
       const rawHeader = [['Date', 'Jour', 'Membre', 'Type', 'Férié?', 'Week-end?']];
-
       const rawRows = exportDuties
         .map((d) => {
           const dayKey = clampDateStr(d.duty_date);
@@ -764,7 +760,7 @@ export default function Insights() {
       const ws4 = XLSX.utils.aoa_to_sheet([...rawHeader, ...rawRows]);
       ws4['!cols'] = [
         { wch: 12 },
-        { wch: 8 },
+        { wch: 10 },
         { wch: 32 },
         { wch: 14 },
         { wch: 10 },
@@ -812,38 +808,24 @@ export default function Insights() {
     const boxH = 66;
 
     const kpiBoxes = [
-      { label: 'Total global', value: String(kpis.total) },
-      { label: 'Solde total', value: String(kpis.baseTotal) },
-      { label: 'Période', value: String(kpis.periodTotal) },
-      { label: 'Week-end (période)', value: String(kpis.weekend) },
+      { label: LABELS.total, value: String(kpis.total) },
+      { label: `${LABELS.solde} (Total)`, value: String(kpis.baseTotal) },
+      { label: `${LABELS.period} (Total)`, value: String(kpis.periodTotal) },
+      { label: 'Week-end (période)', value: String(kpis.weekendPeriod) },
     ];
 
     kpiBoxes.forEach((b, i) => {
       const x = margin + i * (boxW + 18);
       doc.setDrawColor(220);
       doc.roundedRect(x, kpiY, boxW, boxH, 10, 10);
+
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       doc.text(b.label, x + 14, kpiY + 22);
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(22);
-      doc.texttxt(doc, b.value, x + 14, kpiY + 52);
-    });
-
-    // helper to avoid ts issues in some setups
-    function docTxt(d: jsPDF, text: string, x: number, y: number) {
-      d.text(text, x, y);
-    }
-    // fix: replace doc.text call above
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const docT = docTxt;
-
-    // quick patch: re-render KPI values safely
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    kpiBoxes.forEach((b, i) => {
-      const x = margin + i * (boxW + 18);
-      doc.text(String(b.value), x + 14, kpiY + 52);
+      doc.text(b.value, x + 14, kpiY + 52);
     });
 
     let cursorY = kpiY + boxH + 18;
@@ -853,10 +835,9 @@ export default function Insights() {
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    const recText = recommendations.length ? recommendations : ['—'];
-    let yRec = cursorY;
 
-    recText.slice(0, 8).forEach((r) => {
+    let yRec = cursorY;
+    (recommendations.length ? recommendations : ['—']).slice(0, 8).forEach((r) => {
       doc.text(`• ${r}`, margin, yRec);
       yRec += 14;
     });
@@ -892,15 +873,15 @@ export default function Insights() {
       startY: cursorY,
       head: [[
         'Membre',
-        'Solde N',
-        'Solde F',
-        'Solde T',
-        'Période N',
-        'Période F',
-        'Période T',
+        'Solde initial — Normal',
+        'Solde initial — Férié',
+        'Solde initial — Total',
+        'Période — Normal',
+        'Période — Férié',
+        'Période — Total',
         'Total global',
       ]],
-      body: perMemberStats.map((m) => [
+      body: perMemberStats.map((m) => ([
         m.name,
         m.baseNormal,
         m.baseHoliday,
@@ -909,7 +890,7 @@ export default function Insights() {
         m.periodHoliday,
         m.periodTotal,
         m.total,
-      ]),
+      ])),
       styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, lineWidth: 0.5, lineColor: 220 },
       headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 248, 248] },
@@ -920,25 +901,25 @@ export default function Insights() {
       doc.addPage();
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
-      doc.text('Matrice — Membre × Jour de semaine (avec solde)', margin, 56);
+      doc.text('Matrice — Membre × Jour de semaine (période) + Solde initial', margin, 56);
 
       autoTable(doc, {
         startY: 76,
         head: [[
           'Membre',
-          'Solde N',
-          'Solde F',
-          'Solde T',
-          ...weekdayLabels,
+          'Solde initial — Normal',
+          'Solde initial — Férié',
+          'Solde initial — Total',
+          ...weekdayLabels.map((d) => `${d} (période)`),
           'Total période',
           'Total global',
         ]],
         body: weekdayMatrix.map((row) => ([
           row.name,
-          row.soldeNormal,
-          row.soldeHoliday,
-          row.soldeTotal,
-          ...row.counts,
+          row.baseNormal,
+          row.baseHoliday,
+          row.baseTotal,
+          ...row.weekdayCountsPeriod,
           row.periodTotal,
           row.totalGlobal,
         ])),
@@ -1000,7 +981,7 @@ export default function Insights() {
         <div>
           <div className="text-2xl font-bold">Aide à la décision</div>
           <div className="text-sm text-muted-foreground">
-            Lecture rapide + filtres + indicateurs (Totalité = Solde + Période).
+            Lecture rapide + filtres + indicateurs (Total global = Solde initial + Période).
           </div>
         </div>
 
@@ -1008,8 +989,6 @@ export default function Insights() {
           <Badge variant="secondary">Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}</Badge>
           <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
           <Badge variant="outline">Total global: {kpis.total}</Badge>
-          <Badge variant="outline">Solde: {kpis.baseTotal}</Badge>
-          <Badge variant="outline">Période: {kpis.periodTotal}</Badge>
 
           <Dialog open={exportOpen} onOpenChange={setExportOpen}>
             <DialogTrigger asChild>
@@ -1091,9 +1070,9 @@ export default function Insights() {
             </button>
 
             <div className="ml-auto flex gap-2">
-              <Badge variant="secondary">Normal global: {kpis.normal}</Badge>
-              <Badge variant="secondary">Férié global: {kpis.holiday}</Badge>
-              <Badge variant="secondary">Week-end (période): {kpis.weekend}</Badge>
+              <Badge variant="secondary">Solde: {kpis.baseTotal}</Badge>
+              <Badge variant="secondary">Période: {kpis.periodTotal}</Badge>
+              <Badge variant="secondary">Total global: {kpis.total}</Badge>
             </div>
           </div>
 
@@ -1133,17 +1112,36 @@ export default function Insights() {
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Total global</div><div className="text-3xl font-bold mt-1">{kpis.total}</div><div className="text-xs text-muted-foreground mt-1">Solde + Période</div></CardContent></Card>
-        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Solde total</div><div className="text-3xl font-bold mt-1">{kpis.baseTotal}</div><div className="text-xs text-muted-foreground mt-1">Crédits initiaux</div></CardContent></Card>
-        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Période</div><div className="text-3xl font-bold mt-1">{kpis.periodTotal}</div><div className="text-xs text-muted-foreground mt-1">Permanences période</div></CardContent></Card>
-        <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Moyenne / membre</div><div className="text-3xl font-bold mt-1">{kpis.avg}</div><div className="text-xs text-muted-foreground mt-1">Total global</div></CardContent></Card>
+        <Card><CardContent className="py-5">
+          <div className="text-sm text-muted-foreground">{LABELS.total}</div>
+          <div className="text-3xl font-bold mt-1">{kpis.total}</div>
+          <div className="text-xs text-muted-foreground mt-1">{LABELS.solde} + {LABELS.period}</div>
+        </CardContent></Card>
+
+        <Card><CardContent className="py-5">
+          <div className="text-sm text-muted-foreground">{LABELS.solde} (Total)</div>
+          <div className="text-3xl font-bold mt-1">{kpis.baseTotal}</div>
+          <div className="text-xs text-muted-foreground mt-1">Crédits initiaux</div>
+        </CardContent></Card>
+
+        <Card><CardContent className="py-5">
+          <div className="text-sm text-muted-foreground">{LABELS.period} (Total)</div>
+          <div className="text-3xl font-bold mt-1">{kpis.periodTotal}</div>
+          <div className="text-xs text-muted-foreground mt-1">Sur la période filtrée</div>
+        </CardContent></Card>
+
+        <Card><CardContent className="py-5">
+          <div className="text-sm text-muted-foreground">Moyenne / membre (global)</div>
+          <div className="text-3xl font-bold mt-1">{kpis.avg}</div>
+          <div className="text-xs text-muted-foreground mt-1">Basée sur Total global</div>
+        </CardContent></Card>
       </div>
 
       {/* Distribution + fairness */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Répartition par membre (Total global)</CardTitle>
+            <CardTitle>Répartition par membre — Total global</CardTitle>
           </CardHeader>
 
           <CardContent>
@@ -1156,8 +1154,8 @@ export default function Insights() {
                     <Tooltip
                       formatter={(value: any, _n: any, props: any) => {
                         const p = props?.payload;
-                        if (!p) return [value, 'Total global'];
-                        return [`${value} (Solde ${p.baseTotal} + Période ${p.periodTotal})`, 'Total global'];
+                        if (!p) return [value, LABELS.total];
+                        return [`${value} (Solde ${p.baseTotal} + Période ${p.periodTotal})`, LABELS.total];
                       }}
                       labelFormatter={(_label: any, payload: any) => payload?.[0]?.payload?.fullName ?? _label}
                     />
@@ -1177,7 +1175,7 @@ export default function Insights() {
                         <div className="text-lg">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</div>
                         <div className="font-medium">{m.name}</div>
                       </div>
-                      <Badge variant="secondary">{m.total} (S{m.baseTotal}+P{m.periodTotal})</Badge>
+                      <Badge variant="secondary">{m.total} (Solde {m.baseTotal} + Période {m.periodTotal})</Badge>
                     </div>
                   ))}
                 </div>
@@ -1192,12 +1190,13 @@ export default function Insights() {
                         <div className="text-lg">🧊</div>
                         <div className="font-medium">{m.name}</div>
                       </div>
-                      <Badge variant="outline">{m.total} (S{m.baseTotal}+P{m.periodTotal})</Badge>
+                      <Badge variant="outline">{m.total} (Solde {m.baseTotal} + Période {m.periodTotal})</Badge>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
+
           </CardContent>
         </Card>
 
@@ -1217,7 +1216,7 @@ export default function Insights() {
               </div>
               <div>
                 <div className="text-2xl font-bold">{fairness.avg}</div>
-                <div className="text-sm text-muted-foreground">Moyenne / membre</div>
+                <div className="text-sm text-muted-foreground">Moyenne</div>
               </div>
               <div>
                 <div className="text-2xl font-bold">{fairnessGap}</div>
@@ -1263,7 +1262,7 @@ export default function Insights() {
       {/* Comparatives */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Comparatif — Normal (global)</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Comparatif — {LABELS.normal} (global)</CardTitle></CardHeader>
           <CardContent>
             <div className="w-full overflow-x-auto" ref={refChartNormal}>
               <div className="min-w-[1400px] h-72">
@@ -1274,8 +1273,8 @@ export default function Insights() {
                     <Tooltip
                       formatter={(value: any, _name: any, props: any) => {
                         const p = props?.payload;
-                        if (!p) return [value, 'Normal global'];
-                        return [`${value} (Solde ${p.base} + Période ${p.period})`, 'Normal global'];
+                        if (!p) return [value, LABELS.normal];
+                        return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.normal];
                       }}
                       labelFormatter={(_label: any, payload: any) => payload?.[0]?.payload?.fullName ?? _label}
                     />
@@ -1288,7 +1287,7 @@ export default function Insights() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Comparatif — Férié (global)</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Comparatif — {LABELS.holiday} (global)</CardTitle></CardHeader>
           <CardContent>
             <div className="w-full overflow-x-auto" ref={refChartHoliday}>
               <div className="min-w-[1400px] h-72">
@@ -1299,8 +1298,8 @@ export default function Insights() {
                     <Tooltip
                       formatter={(value: any, _name: any, props: any) => {
                         const p = props?.payload;
-                        if (!p) return [value, 'Férié global'];
-                        return [`${value} (Solde ${p.base} + Période ${p.period})`, 'Férié global'];
+                        if (!p) return [value, LABELS.holiday];
+                        return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.holiday];
                       }}
                       labelFormatter={(_label: any, payload: any) => payload?.[0]?.payload?.fullName ?? _label}
                     />
@@ -1316,7 +1315,7 @@ export default function Insights() {
       {/* Matrix */}
       <Card>
         <CardHeader>
-          <CardTitle>Matrice — Membre × Jour de semaine (avec solde)</CardTitle>
+          <CardTitle>Matrice — Jours de semaine (période) + Solde initial</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
@@ -1332,24 +1331,29 @@ export default function Insights() {
                 checked={matrixOnlyActive}
                 onChange={(e) => setMatrixOnlyActive(e.target.checked)}
               />
-              Afficher seulement ceux qui ont &gt; 0 (période)
+              Afficher seulement ceux qui ont &gt; 0 sur la période
             </label>
           </div>
 
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1250px]">
+            <div className="min-w-[1280px]">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Membre</TableHead>
-                    <TableHead className="text-right">Solde N</TableHead>
-                    <TableHead className="text-right">Solde F</TableHead>
-                    <TableHead className="text-right">Solde T</TableHead>
+
+                    <TableHead className="text-right">{headerCell('Solde (Normal)', 'crédit initial')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Solde (Férié)', 'crédit initial')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Solde (Total)', 'crédit initial')}</TableHead>
+
                     {weekdayLabels.map((d) => (
-                      <TableHead key={d} className="text-right">{d}</TableHead>
+                      <TableHead key={d} className="text-right">
+                        {headerCell(d, 'période')}
+                      </TableHead>
                     ))}
-                    <TableHead className="text-right">Total période</TableHead>
-                    <TableHead className="text-right">Total global</TableHead>
+
+                    <TableHead className="text-right">{headerCell('Total période', 'Dim..Sam')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Total global', 'Solde + période')}</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -1361,11 +1365,11 @@ export default function Insights() {
                       <TableRow key={row.memberId}>
                         <TableCell className="font-medium">{row.name}</TableCell>
 
-                        <TableCell className="text-right font-medium">{row.soldeNormal}</TableCell>
-                        <TableCell className="text-right font-medium">{row.soldeHoliday}</TableCell>
-                        <TableCell className="text-right font-semibold">{row.soldeTotal}</TableCell>
+                        <TableCell className="text-right">{row.baseNormal}</TableCell>
+                        <TableCell className="text-right">{row.baseHoliday}</TableCell>
+                        <TableCell className="text-right font-semibold">{row.baseTotal}</TableCell>
 
-                        {row.counts.map((v, idx) => (
+                        {row.weekdayCountsPeriod.map((v, idx) => (
                           <TableCell key={idx} className="text-right">
                             {v === 0 ? <span className="text-muted-foreground">—</span> : <span className="font-semibold">{v}</span>}
                           </TableCell>
@@ -1381,7 +1385,7 @@ export default function Insights() {
           </div>
 
           <div className="text-xs text-muted-foreground mt-2">
-            Les jours affichés (Dim..Sam) représentent la <b>période</b>. Le solde est affiché séparément.
+            Les colonnes Dim..Sam représentent uniquement la <b>période filtrée</b>. Le solde initial est affiché séparément.
           </div>
         </CardContent>
       </Card>
@@ -1389,7 +1393,7 @@ export default function Insights() {
       {/* Totals table */}
       <Card>
         <CardHeader>
-          <CardTitle>Totaux (Solde + Période)</CardTitle>
+          <CardTitle>Totaux — Solde initial + Période</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
@@ -1407,23 +1411,26 @@ export default function Insights() {
               Tri: {tableAsc ? 'Croissant' : 'Décroissant'}
             </button>
             <div className="text-sm text-muted-foreground">
-              (Tri sur Total global)
+              (Tri basé sur Total global)
             </div>
           </div>
 
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1100px]">
+            <div className="min-w-[1180px]">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Membre</TableHead>
-                    <TableHead className="text-right">Solde N</TableHead>
-                    <TableHead className="text-right">Solde F</TableHead>
-                    <TableHead className="text-right">Solde T</TableHead>
-                    <TableHead className="text-right">Période N</TableHead>
-                    <TableHead className="text-right">Période F</TableHead>
-                    <TableHead className="text-right">Période T</TableHead>
-                    <TableHead className="text-right">Total global</TableHead>
+
+                    <TableHead className="text-right">{headerCell('Solde (Normal)', 'crédit initial')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Solde (Férié)', 'crédit initial')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Solde (Total)', 'crédit initial')}</TableHead>
+
+                    <TableHead className="text-right">{headerCell('Période (Normal)', 'sur période')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Période (Férié)', 'sur période')}</TableHead>
+                    <TableHead className="text-right">{headerCell('Période (Total)', 'sur période')}</TableHead>
+
+                    <TableHead className="text-right">{headerCell('Total global', 'Solde + période')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1507,7 +1514,6 @@ export default function Insights() {
               </ResponsiveContainer>
             </div>
           </div>
-
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour normal depuis longtemps.
           </div>
@@ -1540,7 +1546,6 @@ export default function Insights() {
               </ResponsiveContainer>
             </div>
           </div>
-
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour férié depuis longtemps.
           </div>

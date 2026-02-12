@@ -77,6 +77,7 @@ export default function Team() {
   // Form state
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formTitle, setFormTitle] = useState('');
   const [formActive, setFormActive] = useState(true);
 
   // Credits
@@ -94,7 +95,7 @@ export default function Team() {
       // 1) Members
       const { data: membersData, error: membersError } = await supabase
         .from('team_members')
-        .select('id, full_name, email, active, created_at, initial_credit_normal, initial_credit_holiday')
+        .select('*')
         .order('full_name');
 
       if (membersError) throw membersError;
@@ -187,6 +188,7 @@ export default function Team() {
     setEditingMember(null);
     setFormName('');
     setFormEmail('');
+    setFormTitle('');
     setFormActive(true);
     setFormCreditNormal(0);
     setFormCreditHoliday(0);
@@ -197,6 +199,7 @@ export default function Team() {
     setEditingMember(member);
     setFormName(member.full_name);
     setFormEmail(member.email || '');
+    setFormTitle(member.title || '');
     setFormActive(member.active);
     setFormCreditNormal(Number(member.initial_credit_normal ?? 0));
     setFormCreditHoliday(Number(member.initial_credit_holiday ?? 0));
@@ -212,6 +215,7 @@ export default function Team() {
     const payload = {
       full_name: formName.trim(),
       email: formEmail.trim() || null,
+      title: formTitle.trim() || null,
       active: formActive,
       initial_credit_normal: Math.max(0, Number.isFinite(formCreditNormal) ? formCreditNormal : 0),
       initial_credit_holiday: Math.max(0, Number.isFinite(formCreditHoliday) ? formCreditHoliday : 0),
@@ -309,6 +313,11 @@ export default function Team() {
                 <Input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} />
               </div>
 
+              <div className="space-y-2">
+                <Label>{fr.team.grade}</Label>
+                <Input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Crédit initial (Normal)</Label>
@@ -352,10 +361,7 @@ export default function Team() {
             <TableHeader>
               <TableRow>
                 <TableHead>{fr.team.fullName}</TableHead>
-
-                <TableHead className="text-center">Solde normal</TableHead>
-                <TableHead className="text-center">Solde férié</TableHead>
-                <TableHead className="text-center">Total solde</TableHead>
+                <TableHead className="hidden md:table-cell">{fr.team.grade}</TableHead>
 
                 {/* ✅ Renamed columns */}
                 <TableHead className="text-center">Ce mois-ci</TableHead>
@@ -373,16 +379,13 @@ export default function Team() {
             <TableBody>
               {filteredMembers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
                     <p>{fr.team.noMembers}</p>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredMembers.map((member) => {
-                  const creditNormal = Number(member.initial_credit_normal ?? 0);
-                  const creditHoliday = Number(member.initial_credit_holiday ?? 0);
-                  const creditTotal = creditNormal + creditHoliday;
 
                   return (
                     <TableRow key={member.id} className="data-table-row">
@@ -395,9 +398,7 @@ export default function Team() {
                         </div>
                       </TableCell>
 
-                      <TableCell className="text-center font-medium">{creditNormal}</TableCell>
-                      <TableCell className="text-center font-medium">{creditHoliday}</TableCell>
-                      <TableCell className="text-center font-semibold">{creditTotal}</TableCell>
+                      <TableCell className="hidden md:table-cell">{member.title || '—'}</TableCell>
 
                       <TableCell className="text-center font-medium">{member.month_duties || 0}</TableCell>
                       <TableCell className="text-center hidden sm:table-cell">{member.year_duties || 0}</TableCell>
