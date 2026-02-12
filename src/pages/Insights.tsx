@@ -1,38 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { fr } from '@/lib/i18n';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
-import { format, subMonths, differenceInCalendarDays } from 'date-fns';
-import { fr as frLocale } from 'date-fns/locale';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { format, subMonths, differenceInCalendarDays, parseISO, startOfMonth } from 'date-fns';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 type Member = {
   id: string;
   full_name: string;
-  // NEW credits (from team_members table)
   initial_credit_normal?: number | null;
   initial_credit_holiday?: number | null;
 };
 
 type Duty = {
-  duty_date: string;
+  duty_date: string;            // 'YYYY-MM-DD' (date-only)
+  duty_type?: string | null;
   team_member_id: string | null;
   team_member?: { id: string; full_name: string } | null;
 };
@@ -46,6 +30,16 @@ function cn(...classes: Array<string | false | null | undefined>) {
 function shortName(full: string) {
   const parts = full.trim().split(/\s+/);
   return parts[0] || full;
+}
+
+/**
+ * IMPORTANT:
+ * duty_date is a DATE (YYYY-MM-DD). We must not let local timezone shift the weekday.
+ * We force UTC at midnight and use getUTCDay().
+ */
+function parseDateOnlyUTC(dateStr: string) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
 }
 
 export default function Insights() {
@@ -64,19 +58,30 @@ export default function Insights() {
   const [matrixOnlyActive, setMatrixOnlyActive] = useState(false);
   const [tableAsc, setTableAsc] = useState(true);
 
+  // ✅ Period selector (fixes your “Aug 7 not counted” problem)
+  const [period, setPeriod] = useState<'6m' | '12m' | 'all'>('6m');
+
+  const periodStartDateStr = useMemo(() => {
+    const now = new Date();
+
+    if (period === 'all') return null;
+
+    const months = period === '6m' ? 6 : 12;
+
+    // ✅ FIX: include the whole month (Aug 1 -> includes Aug 7)
+    const start = startOfMonth(subMonths(now, months));
+    return format(start, 'yyyy-MM-dd');
+  }, [period]);
+
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [period]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
 
-      const now = new Date();
-      const sixMonthsAgo = subMonths(now, 6);
-
-      // Members (include credits)
       const { data: membersData, error: membersErr } = await supabase
         .from('team_members')
         .select('id, full_name, initial_credit_normal, initial_credit_holiday')
@@ -85,35 +90,36 @@ export default function Insights() {
 
       if (membersErr) throw membersErr;
 
-      // Duties in last 6 months
-      const { data: dutiesData, error: dutiesErr } = await supabase
+      let dutiesQuery = supabase
         .from('duty_entries')
-        .select('duty_date, team_member_id, team_member:team_members(id, full_name)')
-        .gte('duty_date', format(sixMonthsAgo, 'yyyy-MM-dd'));
+        .select('duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)');
 
+      if (periodStartDateStr) {
+        dutiesQuery = dutiesQuery.gte('duty_date', periodStartDateStr);
+      }
+
+      const { data: dutiesData, error: dutiesErr } = await dutiesQuery;
       if (dutiesErr) throw dutiesErr;
 
-      // Holidays
       const { data: holidaysData, error: holidaysErr } = await supabase
         .from('holidays')
         .select('date');
 
       if (holidaysErr) throw holidaysErr;
 
+      // Holidays are already date strings "YYYY-MM-DD" in your DB
       const holidaySet = new Set<string>(
         (holidaysData || [])
           .map((h: any) => h?.date)
           .filter(Boolean)
-          .map((d: string) => format(new Date(d), 'yyyy-MM-dd'))
       );
 
-      const safeMembers = (membersData || []) as Member[];
-      setMembers(safeMembers);
-      setDuties(((dutiesData || []) as any) || []);
+      setMembers((membersData as any) || []);
+      setDuties((dutiesData as any) || []);
       setHolidayDatesSet(holidaySet);
 
-      // default selection: all (UX note: if empty => all)
-      setSelectedMemberIds(safeMembers.map((m) => m.id));
+      // default selection: all members
+      setSelectedMemberIds(((membersData as any) || []).map((m: any) => m.id));
     } catch (e) {
       console.error(e);
     } finally {
@@ -147,7 +153,7 @@ export default function Insights() {
     });
   }, [duties, selectedMemberIds]);
 
-  // Per-member stats (BASE credits + duties in period)
+  // ✅ Per-member stats
   const perMemberStats = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -165,12 +171,12 @@ export default function Insights() {
       }
     > = {};
 
-    // init with BASE credits
+    // init with base credits (solde)
     members.forEach((m) => {
       if (!allowAll && !selectedSet.has(m.id)) return;
 
-      const baseNormal = Number(m.initial_credit_normal ?? 0) || 0;
-      const baseHoliday = Number(m.initial_credit_holiday ?? 0) || 0;
+      const baseNormal = Number(m.initial_credit_normal ?? 0);
+      const baseHoliday = Number(m.initial_credit_holiday ?? 0);
 
       stats[m.id] = {
         memberId: m.id,
@@ -183,21 +189,23 @@ export default function Insights() {
       };
     });
 
-    // add duties from last 6 months
+    // add duties
     filteredDuties.forEach((d) => {
       const mid = d.team_member_id;
       if (!mid || !stats[mid]) return;
 
-      const dt = new Date(d.duty_date);
-      const dayKey = format(dt, 'yyyy-MM-dd');
+      const dayKey = d.duty_date; // "YYYY-MM-DD"
       const isHoliday = holidayDatesSet.has(dayKey);
 
-      const wd = dt.getDay(); // 0..6
+      const dt = parseDateOnlyUTC(d.duty_date);
+      const wd = dt.getUTCDay();
       const isWeekend = wd === 0 || wd === 6;
 
+      // Holiday vs Normal
       if (isHoliday) stats[mid].holiday += 1;
       else stats[mid].normal += 1;
 
+      // Weekend vs Weekday
       if (isWeekend) stats[mid].weekend += 1;
       else stats[mid].weekday += 1;
 
@@ -296,7 +304,7 @@ export default function Insights() {
     return rows;
   }, [perMemberStats, tableSearch, tableAsc]);
 
-  // Weekday matrix
+  // ✅ Weekday matrix (UTC-safe)
   const weekdayMatrix = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -313,11 +321,12 @@ export default function Insights() {
     filteredDuties.forEach((d) => {
       const mid = d.team_member_id;
       if (!mid) return;
+
       const idx = idxById.get(mid);
       if (idx === undefined) return;
 
-      const date = new Date(d.duty_date);
-      matrix[idx].counts[date.getDay()] += 1;
+      const dt = parseDateOnlyUTC(d.duty_date);
+      matrix[idx].counts[dt.getUTCDay()] += 1;
     });
 
     matrix.sort(
@@ -336,7 +345,7 @@ export default function Insights() {
     filteredDuties.forEach((d) => {
       const mid = d.team_member_id;
       if (!mid) return;
-      const dt = new Date(d.duty_date);
+      const dt = parseISO(d.duty_date); // ok for ordering
       const prev = lastDateByMember.get(mid);
       if (!prev || dt > prev) lastDateByMember.set(mid, dt);
     });
@@ -378,14 +387,10 @@ export default function Insights() {
       recs.push(`Équilibre correct : écart de ${fairnessGap}. Continue sur la même logique.`);
     }
 
-    recs.push(
-      `Prochaine rotation suggérée (moins chargés) : ${least.map((m) => shortName(m.name)).join(', ')}.`
-    );
+    recs.push(`Prochaine rotation suggérée (moins chargés) : ${least.map((m) => shortName(m.name)).join(', ')}.`);
 
     if (most[0]?.total >= avg + 3) {
-      recs.push(
-        `Réduire la charge de : ${most.map((m) => shortName(m.name)).join(', ')} (au-dessus de la moyenne).`
-      );
+      recs.push(`Réduire la charge de : ${most.map((m) => shortName(m.name)).join(', ')} (au-dessus de la moyenne).`);
     }
 
     return recs;
@@ -402,10 +407,37 @@ export default function Insights() {
           <div className="text-sm text-muted-foreground">
             Lecture rapide + filtres + indicateurs pour mieux équilibrer la permanence.
           </div>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={cn('text-sm border rounded-md px-3 py-1', period === '6m' && 'bg-muted')}
+              onClick={() => setPeriod('6m')}
+            >
+              6 mois
+            </button>
+            <button
+              type="button"
+              className={cn('text-sm border rounded-md px-3 py-1', period === '12m' && 'bg-muted')}
+              onClick={() => setPeriod('12m')}
+            >
+              12 mois
+            </button>
+            <button
+              type="button"
+              className={cn('text-sm border rounded-md px-3 py-1', period === 'all' && 'bg-muted')}
+              onClick={() => setPeriod('all')}
+            >
+              Tout
+            </button>
+
+            {periodStartDateStr && (
+              <Badge variant="secondary">Depuis: {periodStartDateStr}</Badge>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">Période: 6 derniers mois</Badge>
           <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
           <Badge variant="outline">Total: {kpis.total}</Badge>
         </div>
@@ -456,11 +488,7 @@ export default function Insights() {
                         key={m.id}
                         className="flex items-center gap-2 text-sm border rounded-md px-2 py-2 cursor-pointer hover:bg-muted"
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleMember(m.id)}
-                        />
+                        <input type="checkbox" checked={checked} onChange={() => toggleMember(m.id)} />
                         <span className="truncate">{m.full_name}</span>
                       </label>
                     );
@@ -483,7 +511,7 @@ export default function Insights() {
         <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Week-end</div><div className="text-3xl font-bold mt-1">{kpis.weekend}</div></CardContent></Card>
       </div>
 
-      {/* Distribution + fairness */}
+      {/* Charts */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader><CardTitle>Répartition par membre</CardTitle></CardHeader>
@@ -673,7 +701,11 @@ export default function Insights() {
                           <TableCell className="font-medium">{row.name}</TableCell>
                           {row.counts.map((v, idx) => (
                             <TableCell key={idx} className="text-right">
-                              {v === 0 ? <span className="text-muted-foreground">—</span> : <span className="font-semibold">{v}</span>}
+                              {v === 0 ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <span className="font-semibold">{v}</span>
+                              )}
                             </TableCell>
                           ))}
                           <TableCell className="text-right font-semibold">{total}</TableCell>
@@ -709,9 +741,7 @@ export default function Insights() {
             >
               Tri: {tableAsc ? 'Croissant' : 'Décroissant'}
             </button>
-            <div className="text-sm text-muted-foreground">
-              (Croissant = les moins chargés en haut)
-            </div>
+            <div className="text-sm text-muted-foreground">(Croissant = les moins chargés en haut)</div>
           </div>
 
           <Table>
