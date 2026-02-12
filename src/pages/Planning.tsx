@@ -34,7 +34,6 @@ interface DutyEntry {
   team_member: {
     id: string;
     full_name: string;
-    title: string | null;
     active: boolean;
   } | null;
 }
@@ -73,7 +72,7 @@ export default function Planning() {
             duty_type,
             notes,
             team_member_id,
-            team_member:team_members(id, full_name, title, active)
+            team_member:team_members(id, full_name, active)
           `)
           .gte('duty_date', format(monthStart, 'yyyy-MM-dd'))
           .lte('duty_date', format(monthEnd, 'yyyy-MM-dd'))
@@ -322,11 +321,6 @@ export default function Planning() {
                                   <Badge variant="secondary">
                                     {fr.duty.types[duty.duty_type as keyof typeof fr.duty.types] || duty.duty_type}
                                   </Badge>
-                                  {duty.team_member?.title && (
-                                    <span className="text-xs text-muted-foreground">
-                                      {duty.team_member.title}
-                                    </span>
-                                  )}
                                 </div>
                                 {duty.notes && (
                                   <p className="text-sm text-muted-foreground mt-1">
