@@ -14,6 +14,14 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Award,
+  Medal,
+  Star,
+  Shield,
+  UserMinus,
+  Target,
+} from "lucide-react";
 
 import { Download, FileSpreadsheet, FileText } from 'lucide-react';
 
@@ -57,6 +65,22 @@ const LABELS = {
   normal: 'Jours normaux',
   holiday: 'Jours fériés',
 };
+const MAX_DAYS_SINCE = 200;
+function useIsMobile(breakpointPx = 768) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, [breakpointPx]);
+
+  return isMobile;
+}
+
+
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -66,6 +90,13 @@ function shortName(full: string) {
   const parts = full.trim().split(/\s+/);
   return parts[0] || full;
 }
+function shortDisplayName(full: string) {
+  const parts = full.trim().split(/\s+/);
+  const first = parts[0] || full;
+  const lastInitial = parts[1]?.[0] ? ` ${parts[1][0]}.` : '';
+  return `${first}${lastInitial}`;
+}
+
 
 /**
  * ✅ DB stores date-only: "YYYY-MM-DD"
@@ -95,6 +126,7 @@ function headerCell(title: string, subtitle?: string) {
 
 export default function Insights() {
   const [loading, setLoading] = useState(true);
+  const isMobile = useIsMobile();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -594,7 +626,7 @@ export default function Insights() {
           memberId: m.id,
           name: shortName(m.full_name),
           fullName: m.full_name,
-          days: days ?? 9999,
+          days: days ?? 200,
           hasValue: days !== null,
         };
       })
@@ -1144,58 +1176,111 @@ export default function Insights() {
             <CardTitle>Répartition par membre — Total global</CardTitle>
           </CardHeader>
 
-          <CardContent>
+          <CardContent className="overflow-hidden">
             <div className="w-full overflow-x-auto" ref={refChartTotal}>
-              <div className="min-w-[1400px] h-72">
+              <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={distributionData}>
-                    <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                    <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
+
                     <YAxis fontSize={12} />
                     <Tooltip
-                      formatter={(value: any, _n: any, props: any) => {
-                        const p = props?.payload;
-                        if (!p) return [value, LABELS.total];
-                        return [`${value} (Solde ${p.baseTotal} + Période ${p.periodTotal})`, LABELS.total];
-                      }}
-                      labelFormatter={(_label: any, payload: any) => payload?.[0]?.payload?.fullName ?? _label}
-                    />
+  formatter={(value: any, _n: any, props: any) => {
+    const p = props?.payload;
+    if (!p) return [value, 'Total'];
+    return [`${value}`, `Total • S:${p.baseTotal} • P:${p.periodTotal}`];
+  }}
+  labelFormatter={(_label: any, payload: any) =>
+    payload?.[0]?.payload?.fullName ?? _label
+  }
+/>
+
                     <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-              <div className="rounded-lg border p-3">
-                <div className="font-semibold mb-2">Top 3 (le plus)</div>
-                <div className="space-y-2">
-                  {top3Most.map((m, idx) => (
-                    <div key={m.memberId} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="text-lg">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</div>
-                        <div className="font-medium">{m.name}</div>
-                      </div>
-                      <Badge variant="secondary">{m.total} (Solde {m.baseTotal} + Période {m.periodTotal})</Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-2">
 
-              <div className="rounded-lg border p-3">
-                <div className="font-semibold mb-2">Top 3 (le moins)</div>
-                <div className="space-y-2">
-                  {top3Least.map((m) => (
-                    <div key={m.memberId} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="text-lg">🧊</div>
-                        <div className="font-medium">{m.name}</div>
-                      </div>
-                      <Badge variant="outline">{m.total} (Solde {m.baseTotal} + Période {m.periodTotal})</Badge>
-                    </div>
-                  ))}
+              
+  {/* Top Most */}
+  <div className="rounded-xl border bg-muted/20 p-4">
+    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      Top 3 — Le plus chargé
+    </div>
+
+    <div className="space-y-2">
+      {top3Most.map((m, idx) => {
+        const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉";
+        const first = m.name.split(" ")[0];
+
+        return (
+          <div
+            key={m.memberId}
+            className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40"
+          >
+            <div className="min-w-0 flex items-center gap-3">
+              <div className="shrink-0 text-lg">{medal}</div>
+
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{first}</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  S:{m.baseTotal} • P:{m.periodTotal}
                 </div>
               </div>
             </div>
+
+            <div className="shrink-0 text-lg font-bold tabular-nums">{m.total}</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+
+  {/* Top Least */}
+  <div className="rounded-xl border bg-muted/20 p-4">
+    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      Top 3 — Le moins chargé
+    </div>
+
+    <div className="space-y-2">
+      {top3Least.map((m) => {
+        const first = m.name.split(" ")[0];
+
+        return (
+          <div
+            key={m.memberId}
+            className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40"
+          >
+            <div className="min-w-0 flex items-center gap-3">
+              <div className="shrink-0 text-lg opacity-70">🧊</div>
+
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{first}</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  S:{m.baseTotal} • P:{m.periodTotal}
+                </div>
+              </div>
+            </div>
+
+            <div className="shrink-0 text-lg font-bold tabular-nums">{m.total}</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+</div>
+
+
+            
 
           </CardContent>
         </Card>
@@ -1260,15 +1345,24 @@ export default function Insights() {
       </div>
 
       {/* Comparatives */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+
         <Card>
           <CardHeader><CardTitle>Comparatif — {LABELS.normal} (global)</CardTitle></CardHeader>
-          <CardContent>
+          <CardContent className="overflow-hidden">
             <div className="w-full overflow-x-auto" ref={refChartNormal}>
-              <div className="min-w-[1400px] h-72">
+              <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={normalChartData}>
-                    <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                    <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
+
                     <YAxis fontSize={12} />
                     <Tooltip
                       formatter={(value: any, _name: any, props: any) => {
@@ -1288,12 +1382,19 @@ export default function Insights() {
 
         <Card>
           <CardHeader><CardTitle>Comparatif — {LABELS.holiday} (global)</CardTitle></CardHeader>
-          <CardContent>
+          <CardContent className="overflow-hidden">
             <div className="w-full overflow-x-auto" ref={refChartHoliday}>
-              <div className="min-w-[1400px] h-72">
+              <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={holidayChartData}>
-                    <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                    <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
                     <YAxis fontSize={12} />
                     <Tooltip
                       formatter={(value: any, _name: any, props: any) => {
@@ -1315,9 +1416,9 @@ export default function Insights() {
       {/* Matrix */}
       <Card>
         <CardHeader>
-          <CardTitle>Matrice — Jours de semaine (période) + Solde initial</CardTitle>
+          <CardTitle>Matrice — Semaine</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-hidden">
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
               value={matrixSearch}
@@ -1335,12 +1436,14 @@ export default function Insights() {
             </label>
           </div>
 
-          <div className="w-full overflow-x-auto">
-            <div className="min-w-[1280px]">
+          <div className="w-full overflow-x-auto rounded-xl border bg-background">
+  <div className="min-w-[1280px]">
+
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-20 bg-background shadow-sm">
                   <TableRow>
-                    <TableHead>Membre</TableHead>
+                    <TableHead className="sticky left-0 z-30 bg-background w-[240px] min-w-[240px]">Membre</TableHead>
+
 
                     <TableHead className="text-right">{headerCell('Solde (Normal)', 'crédit initial')}</TableHead>
                     <TableHead className="text-right">{headerCell('Solde (Férié)', 'crédit initial')}</TableHead>
@@ -1362,8 +1465,12 @@ export default function Insights() {
                     .filter((row) => row.name.toLowerCase().includes(matrixSearch.toLowerCase()))
                     .filter((row) => !matrixOnlyActive || row.periodTotal > 0)
                     .map((row) => (
-                      <TableRow key={row.memberId}>
-                        <TableCell className="font-medium">{row.name}</TableCell>
+                      <TableRow key={row.memberId} className="hover:bg-muted/50">
+                        <TableCell className="sticky left-0 z-20 bg-background w-[240px] min-w-[240px] shadow-[6px_0_10px_-8px_rgba(0,0,0,0.25)]">
+  <div className="truncate font-medium">{row.name}</div>
+</TableCell>
+
+
 
                         <TableCell className="text-right">{row.baseNormal}</TableCell>
                         <TableCell className="text-right">{row.baseHoliday}</TableCell>
@@ -1393,9 +1500,9 @@ export default function Insights() {
       {/* Totals table */}
       <Card>
         <CardHeader>
-          <CardTitle>Totaux — Solde initial + Période</CardTitle>
+          <CardTitle>Totaux</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-hidden">
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
               value={tableSearch}
@@ -1415,12 +1522,17 @@ export default function Insights() {
             </div>
           </div>
 
-          <div className="w-full overflow-x-auto">
-            <div className="min-w-[1180px]">
+          <div className="w-full overflow-x-auto rounded-xl border bg-background">
+  <div className="min-w-[1280px]">
+
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-20 bg-background shadow-sm">
+
                   <TableRow>
-                    <TableHead>Membre</TableHead>
+                    <TableHead className="sticky left-0 z-30 bg-background w-[240px] min-w-[240px]">
+  Membre
+</TableHead>
+
 
                     <TableHead className="text-right">{headerCell('Solde (Normal)', 'crédit initial')}</TableHead>
                     <TableHead className="text-right">{headerCell('Solde (Férié)', 'crédit initial')}</TableHead>
@@ -1435,8 +1547,11 @@ export default function Insights() {
                 </TableHeader>
                 <TableBody>
                   {totalsTableRows.map((r) => (
-                    <TableRow key={r.memberId}>
-                      <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableRow key={r.memberId} className="hover:bg-muted/50">
+                      <TableCell className="sticky left-0 z-20 bg-background w-[240px] min-w-[240px] shadow-[6px_0_10px_-8px_rgba(0,0,0,0.25)]">
+  <div className="truncate font-medium">{r.name}</div>
+</TableCell>
+
 
                       <TableCell className="text-right">{r.baseNormal}</TableCell>
                       <TableCell className="text-right">{r.baseHoliday}</TableCell>
@@ -1461,12 +1576,19 @@ export default function Insights() {
         <CardHeader>
           <CardTitle>Days since last duty</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-hidden">
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1400px] h-72">
+            <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={daysSinceLastDutyData}>
-                  <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                  <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
                   <YAxis fontSize={12} />
                   <Tooltip
                     formatter={(value: any, _name: any, props: any) => {
@@ -1492,12 +1614,19 @@ export default function Insights() {
         <CardHeader>
           <CardTitle>Days since last NORMAL duty</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-hidden">
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1400px] h-72">
+            <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={daysSinceLastNormalDutyData}>
-                  <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                  <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
                   <YAxis fontSize={12} />
                   <Tooltip
                     formatter={(value: any, _name: any, props: any) => {
@@ -1524,12 +1653,20 @@ export default function Insights() {
         <CardHeader>
           <CardTitle>Days since last HOLIDAY duty</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-hidden">
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1400px] h-72">
+            <div className={cn(isMobile ? "min-w-[860px] h-72" : "min-w-[1400px] h-72")}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={daysSinceLastHolidayDutyData}>
-                  <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={80} fontSize={12} />
+                  <XAxis
+  dataKey="name"
+  interval={0}
+  angle={isMobile ? -20 : -35}
+  textAnchor="end"
+  height={isMobile ? 60 : 80}
+  fontSize={isMobile ? 10 : 12}
+/>
+
                   <YAxis fontSize={12} />
                   <Tooltip
                     formatter={(value: any, _name: any, props: any) => {
