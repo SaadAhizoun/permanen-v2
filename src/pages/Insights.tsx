@@ -1,11 +1,43 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { fr } from '@/lib/i18n';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { format, subMonths, differenceInCalendarDays, parseISO, startOfMonth } from 'date-fns';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import { format, subMonths, differenceInCalendarDays } from 'date-fns';
+import { fr as frLocale } from 'date-fns/locale';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Download, FileSpreadsheet, FileText } from 'lucide-react';
+
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
 
 type Member = {
   id: string;
@@ -15,7 +47,7 @@ type Member = {
 };
 
 type Duty = {
-  duty_date: string;            // 'YYYY-MM-DD' (date-only)
+  duty_date: string; // YYYY-MM-DD
   duty_type?: string | null;
   team_member_id: string | null;
   team_member?: { id: string; full_name: string } | null;
@@ -33,13 +65,21 @@ function shortName(full: string) {
 }
 
 /**
- * IMPORTANT:
- * duty_date is a DATE (YYYY-MM-DD). We must not let local timezone shift the weekday.
- * We force UTC at midnight and use getUTCDay().
+ * ✅ DB stores date-only: "YYYY-MM-DD"
+ * We must NEVER do new Date("YYYY-MM-DD") because it can shift day by timezone.
  */
 function parseDateOnlyUTC(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+}
+
+function isWeekendByDayIndex(utcDayIndex: number) {
+  return utcDayIndex === 0 || utcDayIndex === 6;
+}
+
+function clampDateStr(d: string) {
+  // very light guard, avoids undefined weirdness
+  return (d || '').trim().slice(0, 10);
 }
 
 export default function Insights() {
@@ -49,7 +89,7 @@ export default function Insights() {
   const [duties, setDuties] = useState<Duty[]>([]);
   const [holidayDatesSet, setHolidayDatesSet] = useState<Set<string>>(new Set());
 
-  // Filters
+  // Filters (UI)
   const [filterOpen, setFilterOpen] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -58,29 +98,31 @@ export default function Insights() {
   const [matrixOnlyActive, setMatrixOnlyActive] = useState(false);
   const [tableAsc, setTableAsc] = useState(true);
 
-  // ✅ Period selector (fixes your “Aug 7 not counted” problem)
-  const [period, setPeriod] = useState<'6m' | '12m' | 'all'>('6m');
+  // Export dialog filters
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState<string>(''); // YYYY-MM-DD
+  const [exportTo, setExportTo] = useState<string>('');     // YYYY-MM-DD
+  const [exportIncludeRaw, setExportIncludeRaw] = useState(true);
+  const [exportIncludeMatrix, setExportIncludeMatrix] = useState(true);
+  const [exportIncludeCharts, setExportIncludeCharts] = useState(true);
 
-  const periodStartDateStr = useMemo(() => {
-    const now = new Date();
-
-    if (period === 'all') return null;
-
-    const months = period === '6m' ? 6 : 12;
-
-    // ✅ FIX: include the whole month (Aug 1 -> includes Aug 7)
-    const start = startOfMonth(subMonths(now, months));
-    return format(start, 'yyyy-MM-dd');
-  }, [period]);
+  // Refs for chart capture (PDF)
+  const refChartTotal = useRef<HTMLDivElement | null>(null);
+  const refChartNormal = useRef<HTMLDivElement | null>(null);
+  const refChartHoliday = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, []);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+
+      const now = new Date();
+      const sixMonthsAgo = subMonths(now, 6);
+      const sixMonthsStr = format(sixMonthsAgo, 'yyyy-MM-dd');
 
       const { data: membersData, error: membersErr } = await supabase
         .from('team_members')
@@ -90,15 +132,10 @@ export default function Insights() {
 
       if (membersErr) throw membersErr;
 
-      let dutiesQuery = supabase
+      const { data: dutiesData, error: dutiesErr } = await supabase
         .from('duty_entries')
-        .select('duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)');
+        .select('duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)')
 
-      if (periodStartDateStr) {
-        dutiesQuery = dutiesQuery.gte('duty_date', periodStartDateStr);
-      }
-
-      const { data: dutiesData, error: dutiesErr } = await dutiesQuery;
       if (dutiesErr) throw dutiesErr;
 
       const { data: holidaysData, error: holidaysErr } = await supabase
@@ -107,19 +144,35 @@ export default function Insights() {
 
       if (holidaysErr) throw holidaysErr;
 
-      // Holidays are already date strings "YYYY-MM-DD" in your DB
       const holidaySet = new Set<string>(
         (holidaysData || [])
-          .map((h: any) => h?.date)
+          .map((h: any) => clampDateStr(h?.date))
           .filter(Boolean)
       );
 
-      setMembers((membersData as any) || []);
-      setDuties((dutiesData as any) || []);
+      const m = (membersData as Member[]) || [];
+      const d = (dutiesData as Duty[]) || [];
+
+      setMembers(m);
+      setDuties(d);
       setHolidayDatesSet(holidaySet);
 
       // default selection: all members
-      setSelectedMemberIds(((membersData as any) || []).map((m: any) => m.id));
+      const allIds = m.map((x) => x.id);
+      setSelectedMemberIds(allIds);
+
+      // default export range = min/max duty_date we have
+      const allDutyDates = d.map((x) => clampDateStr(x.duty_date)).filter(Boolean);
+      const minD = allDutyDates.length
+        ? allDutyDates.reduce((a, b) => (a < b ? a : b))
+        : format(new Date(), 'yyyy-MM-dd');
+
+      const maxD = allDutyDates.length
+        ? allDutyDates.reduce((a, b) => (a > b ? a : b))
+        : format(now, 'yyyy-MM-dd');
+
+      setExportFrom(minD);
+      setExportTo(maxD);
     } catch (e) {
       console.error(e);
     } finally {
@@ -153,7 +206,25 @@ export default function Insights() {
     });
   }, [duties, selectedMemberIds]);
 
-  // ✅ Per-member stats
+  // apply export range on top of filtered duties
+  const exportDuties = useMemo(() => {
+    const from = clampDateStr(exportFrom);
+    const to = clampDateStr(exportTo);
+    if (!from || !to) return filteredDuties;
+
+    return filteredDuties.filter((d) => {
+      const ds = clampDateStr(d.duty_date);
+      return ds >= from && ds <= to;
+    });
+  }, [filteredDuties, exportFrom, exportTo]);
+
+  /**
+   * ✅ IMPORTANT:
+   * If you want WEEKEND to be counted as "Férié" too:
+   * keep this = true
+   */
+  const COUNT_WEEKEND_AS_HOLIDAY = true;
+
   const perMemberStats = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -172,8 +243,8 @@ export default function Insights() {
     > = {};
 
     // init with base credits (solde)
-    members.forEach((m) => {
-      if (!allowAll && !selectedSet.has(m.id)) return;
+    for (const m of members) {
+      if (!allowAll && !selectedSet.has(m.id)) continue;
 
       const baseNormal = Number(m.initial_credit_normal ?? 0);
       const baseHoliday = Number(m.initial_credit_holiday ?? 0);
@@ -187,41 +258,40 @@ export default function Insights() {
         weekend: 0,
         weekday: 0,
       };
-    });
+    }
 
-    // add duties
-    filteredDuties.forEach((d) => {
+    // add duties from export period
+    for (const d of exportDuties) {
       const mid = d.team_member_id;
-      if (!mid || !stats[mid]) return;
+      if (!mid || !stats[mid]) continue;
 
-      const dayKey = d.duty_date; // "YYYY-MM-DD"
-      const isHoliday = holidayDatesSet.has(dayKey);
+      const dayKey = clampDateStr(d.duty_date); // YYYY-MM-DD
+      if (!dayKey) continue;
 
-      const dt = parseDateOnlyUTC(d.duty_date);
+      const dt = parseDateOnlyUTC(dayKey);
       const wd = dt.getUTCDay();
-      const isWeekend = wd === 0 || wd === 6;
+      const isWeekend = isWeekendByDayIndex(wd);
 
-      // Holiday vs Normal
+      const isOfficialHoliday = holidayDatesSet.has(dayKey);
+      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY ? (isOfficialHoliday || isWeekend) : isOfficialHoliday;
+
       if (isHoliday) stats[mid].holiday += 1;
       else stats[mid].normal += 1;
 
-      // Weekend vs Weekday
       if (isWeekend) stats[mid].weekend += 1;
       else stats[mid].weekday += 1;
 
       stats[mid].total += 1;
-    });
+    }
 
     return Object.values(stats);
-  }, [filteredDuties, members, selectedMemberIds, holidayDatesSet]);
+  }, [exportDuties, members, selectedMemberIds, holidayDatesSet]);
 
-  // KPIs
   const kpis = useMemo(() => {
     const total = perMemberStats.reduce((s, m) => s + m.total, 0);
     const holiday = perMemberStats.reduce((s, m) => s + m.holiday, 0);
     const normal = perMemberStats.reduce((s, m) => s + m.normal, 0);
     const weekend = perMemberStats.reduce((s, m) => s + m.weekend, 0);
-
     const avg = perMemberStats.length ? total / perMemberStats.length : 0;
 
     return {
@@ -274,7 +344,6 @@ export default function Insights() {
     return [...perMemberStats].sort((a, b) => a.total - b.total).slice(0, 3);
   }, [perMemberStats]);
 
-  // Fairness simple (gap)
   const fairness = useMemo(() => {
     const counts = perMemberStats.map((m) => m.total);
     if (counts.length === 0) return { max: 0, min: 0, avg: 0 };
@@ -294,40 +363,40 @@ export default function Insights() {
     return { label: 'Déséquilibré', cls: 'bg-red-600 text-white' };
   }, [fairnessGap]);
 
-  // Table rows
   const totalsTableRows = useMemo(() => {
     const rows = [...perMemberStats].filter((r) =>
       r.name.toLowerCase().includes(tableSearch.toLowerCase())
     );
-
     rows.sort((a, b) => (tableAsc ? a.total - b.total : b.total - a.total));
     return rows;
   }, [perMemberStats, tableSearch, tableAsc]);
 
-  // ✅ Weekday matrix (UTC-safe)
   const weekdayMatrix = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
 
     const matrix: Array<{ memberId: string; name: string; counts: number[] }> = [];
 
-    members.forEach((m) => {
-      if (!allowAll && !selectedSet.has(m.id)) return;
+    for (const m of members) {
+      if (!allowAll && !selectedSet.has(m.id)) continue;
       matrix.push({ memberId: m.id, name: m.full_name, counts: Array(7).fill(0) });
-    });
+    }
 
     const idxById = new Map(matrix.map((row, idx) => [row.memberId, idx]));
 
-    filteredDuties.forEach((d) => {
+    for (const d of exportDuties) {
       const mid = d.team_member_id;
-      if (!mid) return;
+      if (!mid) continue;
 
       const idx = idxById.get(mid);
-      if (idx === undefined) return;
+      if (idx === undefined) continue;
 
-      const dt = parseDateOnlyUTC(d.duty_date);
+      const dayKey = clampDateStr(d.duty_date);
+      if (!dayKey) continue;
+
+      const dt = parseDateOnlyUTC(dayKey);
       matrix[idx].counts[dt.getUTCDay()] += 1;
-    });
+    }
 
     matrix.sort(
       (a, b) =>
@@ -335,20 +404,23 @@ export default function Insights() {
     );
 
     return matrix;
-  }, [filteredDuties, members, selectedMemberIds]);
+  }, [exportDuties, members, selectedMemberIds]);
 
-  // Days since last duty
   const daysSinceLastDutyData = useMemo(() => {
     const now = new Date();
 
     const lastDateByMember = new Map<string, Date>();
-    filteredDuties.forEach((d) => {
+    for (const d of exportDuties) {
       const mid = d.team_member_id;
-      if (!mid) return;
-      const dt = parseISO(d.duty_date); // ok for ordering
+      if (!mid) continue;
+
+      const dayKey = clampDateStr(d.duty_date);
+      if (!dayKey) continue;
+
+      const dt = parseDateOnlyUTC(dayKey);
       const prev = lastDateByMember.get(mid);
       if (!prev || dt > prev) lastDateByMember.set(mid, dt);
-    });
+    }
 
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -367,12 +439,10 @@ export default function Insights() {
         };
       })
       .sort((a, b) => b.days - a.days);
-  }, [filteredDuties, members, selectedMemberIds]);
+  }, [exportDuties, members, selectedMemberIds]);
 
-  // Smart recommendations
   const recommendations = useMemo(() => {
     if (perMemberStats.length === 0) return [];
-
     const avg = fairness.avg || 0;
     const sorted = [...perMemberStats].sort((a, b) => a.total - b.total);
 
@@ -381,20 +451,310 @@ export default function Insights() {
 
     const recs: string[] = [];
 
-    if (fairnessGap >= 6) {
+    if (fairnessGap >= 6)
       recs.push(`Déséquilibre important : écart de ${fairnessGap}. Priorise les membres les moins chargés.`);
-    } else {
+    else
       recs.push(`Équilibre correct : écart de ${fairnessGap}. Continue sur la même logique.`);
-    }
 
     recs.push(`Prochaine rotation suggérée (moins chargés) : ${least.map((m) => shortName(m.name)).join(', ')}.`);
-
-    if (most[0]?.total >= avg + 3) {
+    if (most[0]?.total >= avg + 3)
       recs.push(`Réduire la charge de : ${most.map((m) => shortName(m.name)).join(', ')} (au-dessus de la moyenne).`);
-    }
 
     return recs;
   }, [perMemberStats, fairness.avg, fairnessGap]);
+
+  // -----------------------
+  // EXPORTS
+  // -----------------------
+  const reportTitle = `Rapport Permanences — ${clampDateStr(exportFrom) || '…'} → ${clampDateStr(exportTo) || '…'}`;
+
+  const exportExcel = () => {
+  const wb = XLSX.utils.book_new();
+
+  const generatedAt = format(new Date(), 'dd/MM/yyyy HH:mm', { locale: frLocale });
+
+  // -----------------------
+  // SHEET 1: Résumé (clean)
+  // -----------------------
+  const summaryRows = [
+    ['RAPPORT PERMANENCES'],
+    ['Période', `${clampDateStr(exportFrom) || '…'} → ${clampDateStr(exportTo) || '…'}`],
+    ['Généré le', generatedAt],
+    ['Membres inclus', selectedCountLabel],
+    [],
+    ['INDICATEURS'],
+    ['Total', kpis.total],
+    ['Normal', kpis.normal],
+    ['Férié', kpis.holiday],
+    ['Week-end', kpis.weekend],
+    ['Moyenne / membre', kpis.avg],
+    [],
+    ['RECOMMANDATIONS'],
+    ...recommendations.map((r) => [r]),
+  ];
+
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
+
+  ws1['!cols'] = [{ wch: 28 }, { wch: 80 }];
+
+  // Make title bigger by merging cells
+  ws1['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+
+  XLSX.utils.book_append_sheet(wb, ws1, 'Résumé');
+
+  // -----------------------
+  // SHEET 2: Totaux
+  // -----------------------
+  const totalsHeader = [['Membre', 'Normal', 'Férié', 'Total', 'Week-end', 'Semaine']];
+  const totalsRows = perMemberStats.map((m) => [
+    m.name,
+    m.normal,
+    m.holiday,
+    m.total,
+    m.weekend,
+    m.weekday,
+  ]);
+
+  const ws2 = XLSX.utils.aoa_to_sheet([...totalsHeader, ...totalsRows]);
+  ws2['!cols'] = [
+    { wch: 30 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+  ];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Totaux');
+
+  // -----------------------
+  // SHEET 3: Matrice
+  // -----------------------
+  if (exportIncludeMatrix) {
+    const matrixHeader = [['Membre', ...weekdayLabels, 'Total']];
+    const matrixRows = weekdayMatrix.map((row) => {
+      const total = row.counts.reduce((s, x) => s + x, 0);
+      return [row.name, ...row.counts, total];
+    });
+
+    const ws3 = XLSX.utils.aoa_to_sheet([...matrixHeader, ...matrixRows]);
+    ws3['!cols'] = [{ wch: 30 }, ...Array(8).fill({ wch: 10 })];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Matrice');
+  }
+
+  // -----------------------
+  // SHEET 4: Données brutes
+  // -----------------------
+  if (exportIncludeRaw) {
+    const rawHeader = [['Date', 'Jour', 'Membre', 'Type', 'Férié?', 'Week-end?']];
+
+    const rawRows = exportDuties
+      .map((d) => {
+        const dayKey = clampDateStr(d.duty_date);
+        const dt = parseDateOnlyUTC(dayKey);
+        const wd = dt.getUTCDay();
+        const weekend = isWeekendByDayIndex(wd);
+
+        const officialHoliday = holidayDatesSet.has(dayKey);
+        const holiday = COUNT_WEEKEND_AS_HOLIDAY ? (officialHoliday || weekend) : officialHoliday;
+
+        const name = d.team_member?.full_name || d.team_member_id || '—';
+        return [
+          dayKey,
+          weekdayLabels[wd],
+          name,
+          d.duty_type ?? '—',
+          holiday ? 'Oui' : 'Non',
+          weekend ? 'Oui' : 'Non',
+        ];
+      })
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+    const ws4 = XLSX.utils.aoa_to_sheet([...rawHeader, ...rawRows]);
+    ws4['!cols'] = [
+      { wch: 12 },
+      { wch: 8 },
+      { wch: 32 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 12 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Données');
+  }
+
+  XLSX.writeFile(wb, `${reportTitle}.xlsx`);
+};
+
+
+  async function captureNode(node: HTMLElement | null) {
+    if (!node) return null;
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff' });
+    return canvas.toDataURL('image/png');
+  }
+
+  const exportPDF = async () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const margin = 44;
+    const sectionTitle = (txt: string, y: number) => {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text(txt, margin, y);
+  doc.setDrawColor(220);
+  doc.line(margin, y + 6, W - margin, y + 6);
+};
+
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('Rapport Permanences', margin, 56);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.text(
+      `${clampDateStr(exportFrom) || '…'} → ${clampDateStr(exportTo) || '…'}   •   Généré le ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: frLocale })}`,
+      margin,
+      76
+    );
+
+    const kpiY = 100;
+    const boxW = (W - margin * 2 - 18 * 3) / 4;
+    const boxH = 66;
+
+    const kpiBoxes = [
+      { label: 'Total', value: String(kpis.total) },
+      { label: 'Normal', value: String(kpis.normal) },
+      { label: 'Férié', value: String(kpis.holiday) },
+      { label: 'Week-end', value: String(kpis.weekend) },
+    ];
+
+    kpiBoxes.forEach((b, i) => {
+      const x = margin + i * (boxW + 18);
+      doc.setDrawColor(220);
+      doc.roundedRect(x, kpiY, boxW, boxH, 10, 10);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(b.label, x + 14, kpiY + 22);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.text(b.value, x + 14, kpiY + 52);
+    });
+
+    let cursorY = kpiY + boxH + 18;
+    sectionTitle('Recommandations', cursorY + 10);
+cursorY += 28;
+
+doc.setFont('helvetica', 'normal');
+doc.setFontSize(10);
+
+const recText = recommendations.length ? recommendations : ['—'];
+let yRec = cursorY;
+
+recText.slice(0, 6).forEach((r, i) => {
+  doc.text(`• ${r}`, margin, yRec);
+  yRec += 14;
+});
+
+cursorY = yRec + 8;
+
+
+    if (exportIncludeCharts) {
+      const imgTotal = await captureNode(refChartTotal.current);
+      const imgNormal = await captureNode(refChartNormal.current);
+      const imgHoliday = await captureNode(refChartHoliday.current);
+
+      const imgH = 190;
+      const imgW = (W - margin * 2 - 18 * 2) / 3;
+
+      const imgs = [imgTotal, imgNormal, imgHoliday].filter(Boolean) as string[];
+      if (imgs.length) {
+        imgs.slice(0, 3).forEach((img, i) => {
+          const x = margin + i * (imgW + 18);
+          doc.setDrawColor(220);
+          doc.roundedRect(x, cursorY, imgW, imgH, 10, 10);
+          doc.addImage(img, 'PNG', x + 8, cursorY + 8, imgW - 16, imgH - 16);
+        });
+        cursorY += imgH + 18;
+      }
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text('Totaux par membre', margin, cursorY + 14);
+    cursorY += 24;
+
+    autoTable(doc, {
+      startY: cursorY,
+      head: [['Membre', 'Normal', 'Férié', 'Total', 'Week-end', 'Semaine']],
+      body: perMemberStats.map((m) => [m.name, m.normal, m.holiday, m.total, m.weekend, m.weekday]),
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, lineWidth: 0.5, lineColor: 220 },
+headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold' },
+alternateRowStyles: { fillColor: [248, 248, 248] },
+
+      margin: { left: margin, right: margin },
+    });
+
+    if (exportIncludeMatrix) {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text('Matrice — Membre × Jour de semaine', margin, 56);
+
+      autoTable(doc, {
+        startY: 76,
+        head: [['Membre', ...weekdayLabels, 'Total']],
+        body: weekdayMatrix.map((row) => {
+          const total = row.counts.reduce((s, x) => s + x, 0);
+          return [row.name, ...row.counts, total];
+        }),
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, lineWidth: 0.5, lineColor: 220 },
+headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold' },
+alternateRowStyles: { fillColor: [248, 248, 248] },
+        margin: { left: margin, right: margin },
+      });
+    }
+
+    if (exportIncludeRaw) {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text('Données — Permanences', margin, 56);
+
+      const rawRows = exportDuties
+        .map((d) => {
+          const dayKey = clampDateStr(d.duty_date);
+          const dt = parseDateOnlyUTC(dayKey);
+          const wd = dt.getUTCDay();
+          const isWeekend = isWeekendByDayIndex(wd);
+
+          const isOfficialHoliday = holidayDatesSet.has(dayKey);
+          const isHoliday = COUNT_WEEKEND_AS_HOLIDAY ? (isOfficialHoliday || isWeekend) : isOfficialHoliday;
+
+          const name = d.team_member?.full_name || d.team_member_id || '—';
+          return [
+            dayKey,
+            weekdayLabels[wd],
+            name,
+            d.duty_type ?? '—',
+            isHoliday ? 'Oui' : 'Non',
+            isWeekend ? 'Oui' : 'Non',
+          ];
+        })
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+      autoTable(doc, {
+        startY: 76,
+        head: [['Date', 'Jour', 'Membre', 'Type', 'Férié?', 'Week-end?']],
+        body: rawRows,
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, lineWidth: 0.5, lineColor: 220 },
+headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold' },
+alternateRowStyles: { fillColor: [248, 248, 248] },
+
+        margin: { left: margin, right: margin },
+      });
+    }
+
+    doc.save(`${reportTitle}.pdf`);
+  };
 
   if (loading) return <Skeleton className="h-96 w-full" />;
 
@@ -407,39 +767,70 @@ export default function Insights() {
           <div className="text-sm text-muted-foreground">
             Lecture rapide + filtres + indicateurs pour mieux équilibrer la permanence.
           </div>
-
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={cn('text-sm border rounded-md px-3 py-1', period === '6m' && 'bg-muted')}
-              onClick={() => setPeriod('6m')}
-            >
-              6 mois
-            </button>
-            <button
-              type="button"
-              className={cn('text-sm border rounded-md px-3 py-1', period === '12m' && 'bg-muted')}
-              onClick={() => setPeriod('12m')}
-            >
-              12 mois
-            </button>
-            <button
-              type="button"
-              className={cn('text-sm border rounded-md px-3 py-1', period === 'all' && 'bg-muted')}
-              onClick={() => setPeriod('all')}
-            >
-              Tout
-            </button>
-
-            {periodStartDateStr && (
-              <Badge variant="secondary">Depuis: {periodStartDateStr}</Badge>
-            )}
-          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <Badge variant="secondary">Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}</Badge>
           <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
           <Badge variant="outline">Total: {kpis.total}</Badge>
+
+          <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+            <DialogTrigger asChild>
+              <Button variant="default" className="ml-2">
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Exporter un rapport</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Du</div>
+                    <Input value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} placeholder="YYYY-MM-DD" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Au</div>
+                    <Input value={exportTo} onChange={(e) => setExportTo(e.target.value)} placeholder="YYYY-MM-DD" />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 space-y-2">
+                  <div className="text-sm font-medium">Inclure</div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={exportIncludeCharts} onChange={(e) => setExportIncludeCharts(e.target.checked)} />
+                    Graphiques (PDF)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={exportIncludeMatrix} onChange={(e) => setExportIncludeMatrix(e.target.checked)} />
+                    Matrice (Excel + PDF)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={exportIncludeRaw} onChange={(e) => setExportIncludeRaw(e.target.checked)} />
+                    Données brutes (Excel + PDF)
+                  </label>
+                  <div className="text-xs text-muted-foreground">
+                    Le rapport exporte exactement ce que tu vois (membres filtrés + période).
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setExportOpen(false)}>Fermer</Button>
+                <Button variant="secondary" onClick={exportExcel}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Excel
+                </Button>
+                <Button onClick={exportPDF}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  PDF
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -511,12 +902,15 @@ export default function Insights() {
         <Card><CardContent className="py-5"><div className="text-sm text-muted-foreground">Week-end</div><div className="text-3xl font-bold mt-1">{kpis.weekend}</div></CardContent></Card>
       </div>
 
-      {/* Charts */}
+      {/* Distribution + fairness */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Répartition par membre</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Répartition par membre</CardTitle>
+          </CardHeader>
+
           <CardContent>
-            <div className="w-full overflow-x-auto">
+            <div className="w-full overflow-x-auto" ref={refChartTotal}>
               <div className="min-w-[1400px] h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={distributionData}>
@@ -567,13 +961,27 @@ export default function Insights() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Équité (simple)</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Équité (simple)</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-center">
-              <div><div className="text-2xl font-bold">{fairness.max}</div><div className="text-sm text-muted-foreground">Plus chargé</div></div>
-              <div><div className="text-2xl font-bold">{fairness.min}</div><div className="text-sm text-muted-foreground">Moins chargé</div></div>
-              <div><div className="text-2xl font-bold">{fairness.avg}</div><div className="text-sm text-muted-foreground">Moyenne / membre</div></div>
-              <div><div className="text-2xl font-bold">{fairnessGap}</div><div className="text-sm text-muted-foreground">Écart (max-min)</div></div>
+              <div>
+                <div className="text-2xl font-bold">{fairness.max}</div>
+                <div className="text-sm text-muted-foreground">Plus chargé</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold">{fairness.min}</div>
+                <div className="text-sm text-muted-foreground">Moins chargé</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold">{fairness.avg}</div>
+                <div className="text-sm text-muted-foreground">Moyenne / membre</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold">{fairnessGap}</div>
+                <div className="text-sm text-muted-foreground">Écart (max-min)</div>
+              </div>
             </div>
 
             <div className="pt-4 border-t space-y-3">
@@ -585,10 +993,10 @@ export default function Insights() {
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div
                   className={cn(
-                    "h-2",
-                    fairnessGap <= 2 && "bg-green-600",
-                    fairnessGap > 2 && fairnessGap <= 5 && "bg-yellow-500",
-                    fairnessGap > 5 && "bg-red-600"
+                    'h-2',
+                    fairnessGap <= 2 && 'bg-green-600',
+                    fairnessGap > 2 && fairnessGap <= 5 && 'bg-yellow-500',
+                    fairnessGap > 5 && 'bg-red-600'
                   )}
                   style={{ width: `${Math.min(100, Math.max(10, (fairnessGap / 10) * 100))}%` }}
                 />
@@ -616,7 +1024,7 @@ export default function Insights() {
         <Card>
           <CardHeader><CardTitle>Comparatif — Jours normaux</CardTitle></CardHeader>
           <CardContent>
-            <div className="w-full overflow-x-auto">
+            <div className="w-full overflow-x-auto" ref={refChartNormal}>
               <div className="min-w-[1400px] h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={normalChartData}>
@@ -637,7 +1045,7 @@ export default function Insights() {
         <Card>
           <CardHeader><CardTitle>Comparatif — Jours fériés</CardTitle></CardHeader>
           <CardContent>
-            <div className="w-full overflow-x-auto">
+            <div className="w-full overflow-x-auto" ref={refChartHoliday}>
               <div className="min-w-[1400px] h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={holidayChartData}>
@@ -658,7 +1066,9 @@ export default function Insights() {
 
       {/* Matrix */}
       <Card>
-        <CardHeader><CardTitle>Matrice — Membre × Jour de semaine</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Matrice — Membre × Jour de semaine</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
@@ -701,11 +1111,7 @@ export default function Insights() {
                           <TableCell className="font-medium">{row.name}</TableCell>
                           {row.counts.map((v, idx) => (
                             <TableCell key={idx} className="text-right">
-                              {v === 0 ? (
-                                <span className="text-muted-foreground">—</span>
-                              ) : (
-                                <span className="font-semibold">{v}</span>
-                              )}
+                              {v === 0 ? <span className="text-muted-foreground">—</span> : <span className="font-semibold">{v}</span>}
                             </TableCell>
                           ))}
                           <TableCell className="text-right font-semibold">{total}</TableCell>
@@ -725,7 +1131,9 @@ export default function Insights() {
 
       {/* Totals table */}
       <Card>
-        <CardHeader><CardTitle>Totaux (Normal / Férié)</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Totaux (Normal / Férié)</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <input
@@ -741,7 +1149,9 @@ export default function Insights() {
             >
               Tri: {tableAsc ? 'Croissant' : 'Décroissant'}
             </button>
-            <div className="text-sm text-muted-foreground">(Croissant = les moins chargés en haut)</div>
+            <div className="text-sm text-muted-foreground">
+              (Croissant = les moins chargés en haut)
+            </div>
           </div>
 
           <Table>
@@ -769,7 +1179,9 @@ export default function Insights() {
 
       {/* Days since last duty */}
       <Card>
-        <CardHeader><CardTitle>Days since last duty</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Days since last duty</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="w-full overflow-x-auto">
             <div className="min-w-[1400px] h-72">
