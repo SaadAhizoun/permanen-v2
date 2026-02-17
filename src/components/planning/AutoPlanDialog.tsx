@@ -13,17 +13,22 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Calendar as CalendarIcon, Wand2, AlertTriangle, Check } from 'lucide-react';
-import { format, eachDayOfInterval, isWeekend, addDays } from 'date-fns';
+import { format, eachDayOfInterval, isWeekend, addDays, getISOWeek, getYear } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
 
 interface TeamMember {
   id: string;
   full_name: string;
   title: string | null;
   active: boolean;
+  initial_credit_normal: number | null;
+initial_credit_holiday: number | null;
+
 }
+
 
 interface ProposedDuty {
   date: Date;
@@ -68,18 +73,39 @@ export default function AutoPlanDialog({ open, onOpenChange, onPlanApplied }: Au
   }, [open]);
 
   const fetchData = async () => {
-    try {
-      const [membersRes, holidaysRes] = await Promise.all([
-        supabase.from('team_members').select('id, full_name, title, active').eq('active', true).order('full_name'),
-        supabase.from('holidays').select('date'),
-      ]);
+  try {
+    const [membersRes, holidaysRes] = await Promise.all([
+      supabase
+        .from('team_members')
+        .select('id, full_name, title, active, initial_credit_normal, initial_credit_holiday')
+        .eq('active', true)
+        .order('full_name'),
+      supabase
+        .from('holidays')
+        .select('date'),
+    ]);
 
-      if (membersRes.data) setTeamMembers(membersRes.data);
-      if (holidaysRes.data) setHolidays(holidaysRes.data.map(h => h.date));
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    if (membersRes.error) {
+      console.error('membersRes.error =', membersRes.error);
+      toast.error(`Erreur team_members: ${membersRes.error.message}`);
+      return;
     }
-  };
+
+    if (holidaysRes.error) {
+      console.error('holidaysRes.error =', holidaysRes.error);
+      toast.error(`Erreur holidays: ${holidaysRes.error.message}`);
+      return;
+    }
+
+    setTeamMembers((membersRes.data ?? []) as TeamMember[]);
+    setHolidays((holidaysRes.data ?? []).map(h => h.date));
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    toast.error('Erreur lors du chargement');
+  }
+};
+
+
 
   const generatePlan = async () => {
     if (!startDate || !endDate || teamMembers.length === 0) {
@@ -104,20 +130,30 @@ export default function AutoPlanDialog({ open, onOpenChange, onPlanApplied }: Au
       });
       setExistingDuties(dutiesMap);
 
-      // Fetch member duty counts for fairness
-      const { data: memberCounts } = await supabase
-        .from('duty_entries')
-        .select('team_member_id')
-        .gte('duty_date', format(startDate, 'yyyy-MM-dd'))
-        .lte('duty_date', format(endDate, 'yyyy-MM-dd'));
+const { data: memberCounts } = await supabase
+  .from('duty_entries')
+  .select('team_member_id, duty_type');
+
 
       const loadMap: Record<string, number> = {};
-      teamMembers.forEach(m => loadMap[m.id] = 0);
-      (memberCounts || []).forEach(d => {
-        if (d.team_member_id && loadMap[d.team_member_id] !== undefined) {
-          loadMap[d.team_member_id]++;
-        }
-      });
+teamMembers.forEach(m => {
+  const base = (m.initial_credit_normal ?? 0) + (m.initial_credit_holiday ?? 0);
+
+
+  loadMap[m.id] = base;
+});
+
+
+
+(memberCounts || []).forEach((d: any) => {
+  if (!d.team_member_id) return;
+
+  if (loadMap[d.team_member_id] !== undefined) {
+    loadMap[d.team_member_id]++;
+  }
+});
+
+
 
       // Generate days in range
       const days = eachDayOfInterval({ start: startDate, end: endDate });
@@ -126,10 +162,16 @@ export default function AutoPlanDialog({ open, onOpenChange, onPlanApplied }: Au
 
       // Track assignments during generation
       const assignmentLoad = { ...loadMap };
+      const assignedWeeksByMember: Record<string, Set<string>> = {};
+teamMembers.forEach(m => {
+  assignedWeeksByMember[m.id] = new Set();
+});
+
 
       for (const day of days) {
         const dateStr = format(day, 'yyyy-MM-dd');
-        
+        const weekKey = `${getYear(day)}-W${getISOWeek(day)}`;
+
         // Skip weekends if not included
         if (!includeWeekends && isWeekend(day)) continue;
         
@@ -145,22 +187,32 @@ export default function AutoPlanDialog({ open, onOpenChange, onPlanApplied }: Au
         if (neededCount === 0) continue;
 
         // Get candidates (active members not already assigned this day)
-        let candidates = teamMembers.filter(m => !existingForDay.includes(m.id));
+        let candidates = teamMembers.filter(m =>
+  !existingForDay.includes(m.id) &&
+  !assignedWeeksByMember[m.id].has(weekKey)
+);
+
 
         if (candidates.length === 0) continue;
 
         // Sort by strategy
-        if (strategy === 'roundRobin') {
-          // Sort by current load, then stable by name
-          candidates.sort((a, b) => {
-            const diff = assignmentLoad[a.id] - assignmentLoad[b.id];
-            if (diff !== 0) return diff;
-            return a.full_name.localeCompare(b.full_name);
-          });
-        } else {
-          // Least assigned strategies
-          candidates.sort((a, b) => assignmentLoad[a.id] - assignmentLoad[b.id]);
-        }
+if (strategy === 'roundRobin') {
+  candidates.sort((a, b) => {
+    const diff = assignmentLoad[a.id] - assignmentLoad[b.id];
+    if (diff !== 0) return diff;
+    return a.full_name.localeCompare(b.full_name);
+  });
+} else {
+  // Least assigned strategies: avoid alphabetical bias on ties
+  candidates.sort((a, b) => {
+    const diff = assignmentLoad[a.id] - assignmentLoad[b.id];
+    if (diff !== 0) return diff;
+
+    // tie-breaker: randomize to prevent always picking the first alphabetically (AHIZOUN)
+    return Math.random() - 0.5;
+  });
+}
+
 
         // Pick top N
         const selected = candidates.slice(0, neededCount);
@@ -181,6 +233,8 @@ export default function AutoPlanDialog({ open, onOpenChange, onPlanApplied }: Au
           });
 
           assignmentLoad[member.id]++;
+          assignedWeeksByMember[member.id].add(weekKey);
+
         }
       }
 
