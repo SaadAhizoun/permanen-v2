@@ -1,143 +1,181 @@
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { fr } from '@/lib/i18n';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { History as HistoryIcon, Filter, Search, RefreshCw } from 'lucide-react';
-import { format } from 'date-fns';
-import { fr as frLocale } from 'date-fns/locale';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
-type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE' | string;
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
-interface AuditEntry {
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+import { Filter, RefreshCw, Search } from "lucide-react";
+
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+
+import { differenceInCalendarDays, format } from "date-fns";
+
+// ---------------- Types ----------------
+type Member = {
   id: string;
-  action: AuditAction;
-  table_name: string;
-  record_id: string | null;
-  actor_user_id: string | null;
-  created_at: string;
-  // If your table has these columns, they will be used automatically:
-  old_data?: any | null;
-  new_data?: any | null;
+  full_name: string;
+};
+
+type Duty = {
+  duty_date: string; // YYYY-MM-DD
+  duty_type?: string | null;
+  team_member_id: string | null;
+  team_member?: { id: string; full_name: string } | null;
+};
+
+const weekdayLabels = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"] as const;
+
+// ---------------- Helpers ----------------
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-type ProfileRow = { user_id: string; full_name: string | null };
-type MemberRow = { id: string; full_name: string | null };
-
-function badgeVariant(action: AuditAction) {
-  if (action === 'INSERT') return 'default';
-  if (action === 'DELETE') return 'destructive';
-  return 'secondary';
+function shortName(full: string) {
+  const parts = full.trim().split(/\s+/);
+  return parts[0] || full;
 }
 
-function actionLabel(action: AuditAction) {
-  return (fr.history.actions as any)?.[action] || action;
+function clampDateStr(d: string) {
+  return (d || "").trim().slice(0, 10);
 }
 
-function safeShortId(id?: string | null) {
-  return id ? id.slice(0, 8) : '—';
+/**
+ * DB stores date-only: "YYYY-MM-DD"
+ * NEVER do new Date("YYYY-MM-DD") (timezone shift risk).
+ */
+function parseDateOnlyUTC(dateStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
 }
 
-function getChangedKeys(oldData: any, newData: any) {
-  if (!oldData || !newData) return [];
-  const keys = new Set([...Object.keys(oldData), ...Object.keys(newData)]);
-  const changed: string[] = [];
-  keys.forEach((k) => {
-    const a = oldData?.[k];
-    const b = newData?.[k];
-    // basic compare; good enough for this UI
-    if (JSON.stringify(a) !== JSON.stringify(b)) changed.push(k);
-  });
-  return changed;
+function isWeekendByDayIndex(utcDayIndex: number) {
+  return utcDayIndex === 0 || utcDayIndex === 6;
 }
 
+function formatFrFromYYYYMMDD(dateStr: string) {
+  const s = clampDateStr(dateStr);
+  if (!s || s.length < 10) return "—";
+  const [y, m, d] = s.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+const CHART_MOBILE_LIMIT = 10;
+function useIsMobile(breakpointPx = 768) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, [breakpointPx]);
+  return isMobile;
+}
+
+function limitForMobile<T>(arr: T[], isMobile: boolean, limit = CHART_MOBILE_LIMIT) {
+  return isMobile ? arr.slice(0, limit) : arr;
+}
+
+// ---------------- Component ----------------
 export default function History() {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const isMobile = useIsMobile();
 
-  // Enrich
-  const [nameByUserId, setNameByUserId] = useState<Map<string, string>>(new Map());
-  const [nameByMemberId, setNameByMemberId] = useState<Map<string, string>>(new Map());
+  const [members, setMembers] = useState<Member[]>([]);
+  const [duties, setDuties] = useState<Duty[]>([]);
+  const [holidayDatesSet, setHolidayDatesSet] = useState<Set<string>>(new Set());
 
-  // UX
-  const [q, setQ] = useState('');
-  const [tableFilter, setTableFilter] = useState<string>('all');
-  const [actionFilter, setActionFilter] = useState<string>('all');
+  // Filters
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
+  const [periodFrom, setPeriodFrom] = useState<string>("");
+  const [periodTo, setPeriodTo] = useState<string>("");
+
+  // Search in tables
+  const [q, setQ] = useState("");
+  const [tableAsc, setTableAsc] = useState(false);
+
+  /**
+   * ✅ Weekend counted as holiday (same as Insights)
+   * If you want weekend NOT holiday, set false.
+   */
+  const COUNT_WEEKEND_AS_HOLIDAY = true;
 
   const fetchAll = async () => {
     try {
       setLoading(true);
 
-      const { data: auditData, error: auditErr } = (await supabase
-        .from('audit_log_entries')
-        // IMPORTANT: keep * to support old_data/new_data if they exist
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(200)) as any;
+      // members
+      const { data: membersData, error: membersErr } = await supabase
+        .from("team_members")
+        .select("id, full_name")
+        .eq("active", true)
+        .order("full_name", { ascending: true });
 
-      if (auditErr) throw auditErr;
+      if (membersErr) throw membersErr;
 
-      const rows: AuditEntry[] = (auditData || []) as any;
-      setEntries(rows);
+      // duties
+      const { data: dutiesData, error: dutiesErr } = await supabase
+        .from("duty_entries")
+        .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)");
 
-      // Collect actor ids
-      const actorIds = Array.from(
-        new Set(rows.map((r) => r.actor_user_id).filter(Boolean) as string[])
+      if (dutiesErr) throw dutiesErr;
+
+      // holidays
+      const { data: holidaysData, error: holidaysErr } = await supabase
+        .from("holidays")
+        .select("date");
+
+      if (holidaysErr) throw holidaysErr;
+
+      const m = (membersData as Member[]) || [];
+      const d = (dutiesData as Duty[]) || [];
+
+      setMembers(m);
+      setDuties(d);
+
+      // default selection: all members
+      setSelectedMemberIds(m.map((x) => x.id));
+
+      const holidaySet = new Set<string>(
+        (holidaysData || [])
+          .map((h: any) => clampDateStr(h?.date))
+          .filter(Boolean)
       );
+      setHolidayDatesSet(holidaySet);
 
-      // Collect team_member ids from old/new data if available
-      const memberIds = Array.from(
-        new Set(
-          rows
-            .flatMap((r) => {
-              const ids: Array<string | null | undefined> = [];
-              ids.push(r?.new_data?.team_member_id);
-              ids.push(r?.old_data?.team_member_id);
-              return ids;
-            })
-            .filter(Boolean) as string[]
-        )
-      );
+      // default range = min/max duty_date
+      const allDutyDates = d.map((x) => clampDateStr(x.duty_date)).filter(Boolean);
+      const minD = allDutyDates.length
+        ? allDutyDates.reduce((a, b) => (a < b ? a : b))
+        : format(new Date(), "yyyy-MM-dd");
+      const maxD = allDutyDates.length
+        ? allDutyDates.reduce((a, b) => (a > b ? a : b))
+        : format(new Date(), "yyyy-MM-dd");
 
-      // Fetch profiles names
-      if (actorIds.length > 0) {
-        const { data: profData, error: profErr } = (await supabase
-          .from('profiles')
-          .select('user_id, full_name')
-          .in('user_id', actorIds)) as any;
-
-        if (!profErr) {
-          const map = new Map<string, string>();
-          (profData as ProfileRow[] | null)?.forEach((p) => {
-            if (p.user_id) map.set(p.user_id, p.full_name || 'Utilisateur');
-          });
-          setNameByUserId(map);
-        }
-      } else {
-        setNameByUserId(new Map());
-      }
-
-      // Fetch team_members names (for duty_entries)
-      if (memberIds.length > 0) {
-        const { data: memData, error: memErr } = (await supabase
-          .from('team_members')
-          .select('id, full_name')
-          .in('id', memberIds)) as any;
-
-        if (!memErr) {
-          const map = new Map<string, string>();
-          (memData as MemberRow[] | null)?.forEach((m) => {
-            if (m.id) map.set(m.id, m.full_name || 'Membre');
-          });
-          setNameByMemberId(map);
-        }
-      } else {
-        setNameByMemberId(new Map());
-      }
+      setPeriodFrom(minD);
+      setPeriodTo(maxD);
     } catch (e) {
       console.error(e);
     } finally {
@@ -146,217 +184,789 @@ export default function History() {
   };
 
   useEffect(() => {
-    fetchAll();
+    void fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const tables = useMemo(() => {
-    const set = new Set(entries.map((e) => e.table_name).filter(Boolean));
-    return ['all', ...Array.from(set).sort()];
-  }, [entries]);
-
-  const actions = useMemo(() => {
-    const set = new Set(entries.map((e) => e.action).filter(Boolean));
-    return ['all', ...Array.from(set).sort()];
-  }, [entries]);
-
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return entries.filter((e) => {
-      if (tableFilter !== 'all' && e.table_name !== tableFilter) return false;
-      if (actionFilter !== 'all' && e.action !== actionFilter) return false;
-
-      if (!s) return true;
-
-      const actorName = e.actor_user_id ? nameByUserId.get(e.actor_user_id) || '' : '';
-      const recId = e.record_id || '';
-      const tname = e.table_name || '';
-      const action = e.action || '';
-
-      // also search inside duty_entries summary fields (if present)
-      const dutyDate = e?.new_data?.duty_date || e?.old_data?.duty_date || '';
-      const memberId = e?.new_data?.team_member_id || e?.old_data?.team_member_id || '';
-      const memberName = memberId ? nameByMemberId.get(memberId) || '' : '';
-
-      const hay = `${actorName} ${recId} ${tname} ${action} ${dutyDate} ${memberName}`.toLowerCase();
-      return hay.includes(s);
+  const toggleMember = (memberId: string) => {
+    setSelectedMemberIds((prev) => {
+      const set = new Set(prev);
+      if (set.has(memberId)) set.delete(memberId);
+      else set.add(memberId);
+      return Array.from(set);
     });
-  }, [entries, q, tableFilter, actionFilter, nameByUserId, nameByMemberId]);
-
-  const renderDetails = (e: AuditEntry) => {
-    // If your audit table doesn't store old_data/new_data, we show a fallback.
-    const hasAnyJson = !!(e.old_data || e.new_data);
-
-    // Nice details specifically for duty_entries
-    if (e.table_name === 'duty_entries' && hasAnyJson) {
-      const dutyDate = e?.new_data?.duty_date || e?.old_data?.duty_date || null;
-      const memberId = e?.new_data?.team_member_id || e?.old_data?.team_member_id || null;
-      const memberName = memberId ? nameByMemberId.get(memberId) || safeShortId(memberId) : '—';
-
-      if (e.action === 'INSERT') {
-        return `Ajout: ${dutyDate || '—'} → ${memberName}`;
-      }
-      if (e.action === 'DELETE') {
-        return `Suppression: ${dutyDate || '—'} → ${memberName}`;
-      }
-
-      // UPDATE
-      const changed = getChangedKeys(e.old_data, e.new_data);
-      const interesting = changed.filter((k) =>
-        ['duty_date', 'team_member_id', 'duty_type', 'notes'].includes(k)
-      );
-
-      if (interesting.includes('team_member_id')) {
-        const oldId = e?.old_data?.team_member_id;
-        const newId = e?.new_data?.team_member_id;
-        const oldName = oldId ? nameByMemberId.get(oldId) || safeShortId(oldId) : '—';
-        const newName = newId ? nameByMemberId.get(newId) || safeShortId(newId) : '—';
-        return `Changement membre: ${oldName} → ${newName}${dutyDate ? ` (date: ${dutyDate})` : ''}`;
-      }
-
-      if (interesting.length > 0) {
-        return `Modification: ${interesting.join(', ')}${dutyDate ? ` (date: ${dutyDate})` : ''}`;
-      }
-
-      return `Modification (détails dispo)`;
-    }
-
-    // Generic fallback
-    if (hasAnyJson && e.action === 'UPDATE') {
-      const changed = getChangedKeys(e.old_data, e.new_data);
-      if (changed.length > 0) return `Champs modifiés: ${changed.slice(0, 4).join(', ')}${changed.length > 4 ? '…' : ''}`;
-      return 'Modification';
-    }
-
-    return '—';
   };
+
+  const selectAll = () => setSelectedMemberIds(members.map((m) => m.id));
+  const clearAll = () => setSelectedMemberIds([]);
+
+  const selectedCountLabel =
+    selectedMemberIds.length === 0 ? members.length : selectedMemberIds.length;
+
+  // --- Filter duties by member selection
+  const filteredByMembers = useMemo(() => {
+    const allowAll = selectedMemberIds.length === 0;
+    const set = new Set(selectedMemberIds);
+
+    return duties.filter((d) => {
+      if (!d.team_member_id) return false;
+      if (allowAll) return true;
+      return set.has(d.team_member_id);
+    });
+  }, [duties, selectedMemberIds]);
+
+  // --- Filter duties by period (THIS is the main filter)
+  const periodDuties = useMemo(() => {
+    const from = clampDateStr(periodFrom);
+    const to = clampDateStr(periodTo);
+    if (!from || !to) return filteredByMembers;
+
+    const a = from <= to ? from : to;
+    const b = from <= to ? to : from;
+
+    return filteredByMembers.filter((d) => {
+      const ds = clampDateStr(d.duty_date);
+      return ds >= a && ds <= b;
+    });
+  }, [filteredByMembers, periodFrom, periodTo]);
+
+  // --- Build per-member worked-day lists + counts (NO solde here)
+  const perMember = useMemo(() => {
+    const allowAll = selectedMemberIds.length === 0;
+    const selectedSet = new Set(selectedMemberIds);
+
+    const map: Record<
+      string,
+      {
+        memberId: string;
+        name: string;
+        // counts in period
+        periodNormal: number;
+        periodHoliday: number;
+        periodTotal: number;
+        // lists in period
+        daysNormal: string[];
+        daysHoliday: string[];
+        daysAll: string[];
+        // last in period
+        lastDutyDateUTC: Date | null;
+        lastNormalDutyDateUTC: Date | null;
+      }
+    > = {};
+
+    for (const m of members) {
+      if (!allowAll && !selectedSet.has(m.id)) continue;
+
+      map[m.id] = {
+        memberId: m.id,
+        name: m.full_name,
+        periodNormal: 0,
+        periodHoliday: 0,
+        periodTotal: 0,
+        daysNormal: [],
+        daysHoliday: [],
+        daysAll: [],
+        lastDutyDateUTC: null,
+        lastNormalDutyDateUTC: null,
+      };
+    }
+
+    for (const d of periodDuties) {
+      const mid = d.team_member_id;
+      if (!mid || !map[mid]) continue;
+
+      const dayKey = clampDateStr(d.duty_date);
+      if (!dayKey) continue;
+
+      const dt = parseDateOnlyUTC(dayKey);
+      const wd = dt.getUTCDay();
+      const isWeekend = isWeekendByDayIndex(wd);
+
+      const isOfficialHoliday = holidayDatesSet.has(dayKey);
+      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY
+        ? isOfficialHoliday || isWeekend
+        : isOfficialHoliday;
+
+      map[mid].periodTotal += 1;
+      map[mid].daysAll.push(dayKey);
+
+      // last duty
+      const prevLast = map[mid].lastDutyDateUTC;
+      if (!prevLast || dt > prevLast) map[mid].lastDutyDateUTC = dt;
+
+      if (isHoliday) {
+        map[mid].periodHoliday += 1;
+        map[mid].daysHoliday.push(dayKey);
+      } else {
+        map[mid].periodNormal += 1;
+        map[mid].daysNormal.push(dayKey);
+
+        // last normal duty
+        const prevLastNormal = map[mid].lastNormalDutyDateUTC;
+        if (!prevLastNormal || dt > prevLastNormal) map[mid].lastNormalDutyDateUTC = dt;
+      }
+    }
+
+    // sort day lists ascending for display
+    for (const k of Object.keys(map)) {
+      map[k].daysAll.sort();
+      map[k].daysNormal.sort();
+      map[k].daysHoliday.sort();
+    }
+
+    return Object.values(map);
+  }, [members, periodDuties, selectedMemberIds, holidayDatesSet]);
+
+  // KPIs (period only)
+  const kpis = useMemo(() => {
+    const total = perMember.reduce((s, m) => s + m.periodTotal, 0);
+    const normal = perMember.reduce((s, m) => s + m.periodNormal, 0);
+    const holiday = perMember.reduce((s, m) => s + m.periodHoliday, 0);
+    const avg = perMember.length ? total / perMember.length : 0;
+
+    return {
+      total,
+      normal,
+      holiday,
+      avg: Math.round(avg * 10) / 10,
+    };
+  }, [perMember]);
+
+  // Charts data
+  const distributionData = useMemo(() => {
+    return [...perMember]
+      .map((m) => ({
+        memberId: m.memberId,
+        name: shortName(m.name),
+        fullName: m.name,
+        total: m.periodTotal,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [perMember]);
+
+  const normalChartData = useMemo(() => {
+    return [...perMember]
+      .map((m) => ({
+        memberId: m.memberId,
+        name: shortName(m.name),
+        fullName: m.name,
+        count: m.periodNormal,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [perMember]);
+
+  const holidayChartData = useMemo(() => {
+    return [...perMember]
+      .map((m) => ({
+        memberId: m.memberId,
+        name: shortName(m.name),
+        fullName: m.name,
+        count: m.periodHoliday,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [perMember]);
+
+  // Days since (based on period last duty dates)
+  const daysSinceLastDutyData = useMemo(() => {
+    const now = new Date();
+    return [...perMember]
+      .map((m) => {
+        const days =
+          m.lastDutyDateUTC ? Math.max(0, differenceInCalendarDays(now, m.lastDutyDateUTC)) : null;
+        return {
+          memberId: m.memberId,
+          name: shortName(m.name),
+          fullName: m.name,
+          days: days ?? 9999, // "Jamais" high bar
+          hasValue: days !== null,
+        };
+      })
+      .sort((a, b) => b.days - a.days);
+  }, [perMember]);
+
+  const daysSinceLastNormalDutyData = useMemo(() => {
+    const now = new Date();
+    return [...perMember]
+      .map((m) => {
+        const days =
+          m.lastNormalDutyDateUTC
+            ? Math.max(0, differenceInCalendarDays(now, m.lastNormalDutyDateUTC))
+            : null;
+        return {
+          memberId: m.memberId,
+          name: shortName(m.name),
+          fullName: m.name,
+          days: days ?? 9999,
+          hasValue: days !== null,
+        };
+      })
+      .sort((a, b) => b.days - a.days);
+  }, [perMember]);
+
+  // Mobile limited chart data
+  const distributionDataForChart = useMemo(
+    () => limitForMobile(distributionData, isMobile),
+    [distributionData, isMobile]
+  );
+  const normalChartDataForChart = useMemo(
+    () => limitForMobile(normalChartData, isMobile),
+    [normalChartData, isMobile]
+  );
+  const holidayChartDataForChart = useMemo(
+    () => limitForMobile(holidayChartData, isMobile),
+    [holidayChartData, isMobile]
+  );
+  const daysSinceLastDutyDataForChart = useMemo(
+    () => limitForMobile(daysSinceLastDutyData, isMobile),
+    [daysSinceLastDutyData, isMobile]
+  );
+  const daysSinceLastNormalDutyDataForChart = useMemo(
+    () => limitForMobile(daysSinceLastNormalDutyData, isMobile),
+    [daysSinceLastNormalDutyData, isMobile]
+  );
+
+  // Summary table rows (search + sort)
+  const summaryRows = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const rows = perMember.filter((m) => m.name.toLowerCase().includes(s));
+    rows.sort((a, b) =>
+      tableAsc ? a.periodTotal - b.periodTotal : b.periodTotal - a.periodTotal
+    );
+    return rows;
+  }, [perMember, q, tableAsc]);
+
+  // For “list of days worked by person” – clean grouping
+  const daysByMember = useMemo(() => {
+    const map = new Map<string, { all: string[]; normal: Set<string>; holiday: Set<string> }>();
+    perMember.forEach((m) => {
+      map.set(m.memberId, {
+        all: m.daysAll,
+        normal: new Set(m.daysNormal),
+        holiday: new Set(m.daysHoliday),
+      });
+    });
+    return map;
+  }, [perMember]);
 
   if (loading) return <Skeleton className="h-96 w-full" />;
 
   return (
-    <div className="animate-fade-in space-y-4">
-      <Card>
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <HistoryIcon className="h-5 w-5" />
-            {fr.history.title}
-          </CardTitle>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={fetchAll}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Actualiser
-            </Button>
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-1">
+          <div className="text-xl md:text-2xl font-bold">Historique — Permanences</div>
+          <div className="text-sm text-muted-foreground">
+            Vue “work-log” (période + membres) — <b>sans solde initial</b>.
           </div>
-        </CardHeader>
 
+          <div className="flex flex-wrap gap-2 pt-2 md:hidden">
+            <Badge variant="secondary">
+              Période: {clampDateStr(periodFrom)} → {clampDateStr(periodTo)}
+            </Badge>
+            <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
+            <Badge variant="outline">Total: {kpis.total}</Badge>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={fetchAll}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Actualiser
+          </Button>
+        </div>
+      </div>
+
+      {/* Sticky filters */}
+      <Card className="md:sticky md:top-2 z-10">
+        <CardContent className="py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={selectAll}
+              className="underline underline-offset-4"
+            >
+              Tout sélectionner
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearAll}
+              className="underline underline-offset-4"
+            >
+              Tout désélectionner
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilterOpen((v) => !v)}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              {filterOpen ? "Fermer" : "Choisir des membres"}
+            </Button>
+
+            {/* Date range */}
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground">Du</div>
+                <Input
+                  type="date"
+                  value={periodFrom}
+                  onChange={(e) => setPeriodFrom(e.target.value)}
+                  className="w-[160px]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground">Au</div>
+                <Input
+                  type="date"
+                  value={periodTo}
+                  onChange={(e) => setPeriodTo(e.target.value)}
+                  className="w-[160px]"
+                />
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const allDutyDates = duties
+                    .map((x) => clampDateStr(x.duty_date))
+                    .filter(Boolean);
+
+                  const minD = allDutyDates.length
+                    ? allDutyDates.reduce((a, b) => (a < b ? a : b))
+                    : format(new Date(), "yyyy-MM-dd");
+
+                  const maxD = allDutyDates.length
+                    ? allDutyDates.reduce((a, b) => (a > b ? a : b))
+                    : format(new Date(), "yyyy-MM-dd");
+
+                  setPeriodFrom(minD);
+                  setPeriodTo(maxD);
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Badge variant="secondary">Normal: {kpis.normal}</Badge>
+              <Badge variant="secondary">Férié: {kpis.holiday}</Badge>
+              <Badge variant="secondary">Total: {kpis.total}</Badge>
+            </div>
+          </div>
+
+          {/* Members picker */}
+          {filterOpen && (
+            <div className="mt-4 border rounded-lg p-3">
+              <div className="relative w-full">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder="Rechercher un membre..."
+                  className="pl-9"
+                />
+              </div>
+
+              <div className="mt-3 max-h-60 overflow-auto grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                {members
+                  .filter((m) =>
+                    m.full_name.toLowerCase().includes(memberSearch.toLowerCase())
+                  )
+                  .map((m) => {
+                    const checked = selectedMemberIds.includes(m.id);
+                    return (
+                      <label
+                        key={m.id}
+                        className="flex items-center gap-2 text-sm border rounded-md px-2 py-2 cursor-pointer hover:bg-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMember(m.id)}
+                        />
+                        <span className="truncate">{m.full_name}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+
+              <div className="text-xs text-muted-foreground mt-2">
+                Astuce: laisse vide (0 sélection) pour “tous les membres”.
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* KPI Cards */}
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <Card>
+          <CardContent className="py-4 md:py-5">
+            <div className="text-sm text-muted-foreground">Total (période)</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.total}</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {clampDateStr(periodFrom)} → {clampDateStr(periodTo)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="py-4 md:py-5">
+            <div className="text-sm text-muted-foreground">Jours normaux</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.normal}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="py-4 md:py-5">
+            <div className="text-sm text-muted-foreground">Jours fériés</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.holiday}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="py-4 md:py-5">
+            <div className="text-sm text-muted-foreground">Moyenne / membre</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.avg}</div>
+            <div className="text-xs text-muted-foreground mt-1">sur la période</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Répartition par membre — Total (période)</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <div className="h-[260px] md:h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={distributionDataForChart}>
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={isMobile ? -25 : -35}
+                    textAnchor="end"
+                    height={isMobile ? 60 : 80}
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                  <Tooltip
+                    formatter={(value: any) => [`${value}`, "Total (période)"]}
+                    labelFormatter={(_label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullName ?? _label
+                    }
+                  />
+                  <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Comparatif — Jours normaux (période)</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <div className="h-[260px] md:h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={normalChartDataForChart}>
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={isMobile ? -25 : -35}
+                    textAnchor="end"
+                    height={isMobile ? 60 : 80}
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                  <Tooltip
+                    formatter={(value: any) => [`${value}`, "Jours normaux"]}
+                    labelFormatter={(_label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullName ?? _label
+                    }
+                  />
+                  <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {isMobile && normalChartData.length > CHART_MOBILE_LIMIT && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Comparatif — Jours fériés (période)</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <div className="h-[260px] md:h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={holidayChartDataForChart}>
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={isMobile ? -25 : -35}
+                    textAnchor="end"
+                    height={isMobile ? 60 : 80}
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                  <Tooltip
+                    formatter={(value: any) => [`${value}`, "Jours fériés"]}
+                    labelFormatter={(_label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullName ?? _label
+                    }
+                  />
+                  <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {isMobile && holidayChartData.length > CHART_MOBILE_LIMIT && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Days since last duty</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <div className="h-[260px] md:h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={daysSinceLastDutyDataForChart}>
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={isMobile ? -25 : -35}
+                    textAnchor="end"
+                    height={isMobile ? 60 : 80}
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                  <Tooltip
+                    formatter={(value: any, _name: any, props: any) => {
+                      const hasValue = props?.payload?.hasValue;
+                      if (!hasValue) return ["Jamais", "Jours"];
+                      return [value, "Jours"];
+                    }}
+                    labelFormatter={(_label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullName ?? _label
+                    }
+                  />
+                  <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="text-xs text-muted-foreground mt-2">
+              “Jamais” = aucune permanence trouvée dans la période filtrée.
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Days since last NORMAL duty</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <div className="h-[260px] md:h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={daysSinceLastNormalDutyDataForChart}>
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={isMobile ? -25 : -35}
+                    textAnchor="end"
+                    height={isMobile ? 60 : 80}
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                  <Tooltip
+                    formatter={(value: any, _name: any, props: any) => {
+                      const hasValue = props?.payload?.hasValue;
+                      if (!hasValue) return ["Jamais", "Jours"];
+                      return [value, "Jours"];
+                    }}
+                    labelFormatter={(_label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullName ?? _label
+                    }
+                  />
+                  <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Summary table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Résumé — Par membre</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-3">
-          {/* Filters */}
           <div className="flex flex-col md:flex-row md:items-center gap-3">
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Rechercher (utilisateur, date, membre, table, id)..."
+                placeholder="Chercher un membre..."
                 className="pl-9"
               />
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <Filter className="h-4 w-4 text-muted-foreground" />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setTableAsc((v) => !v)}
+            >
+              Tri: {tableAsc ? "Croissant" : "Décroissant"}
+            </Button>
 
-              <select
-                className="border rounded-md px-2 py-2 text-sm bg-background"
-                value={tableFilter}
-                onChange={(e) => setTableFilter(e.target.value)}
-              >
-                {tables.map((t) => (
-                  <option key={t} value={t}>
-                    {t === 'all' ? 'Toutes tables' : t}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                className="border rounded-md px-2 py-2 text-sm bg-background"
-                value={actionFilter}
-                onChange={(e) => setActionFilter(e.target.value)}
-              >
-                {actions.map((a) => (
-                  <option key={a} value={a}>
-                    {a === 'all' ? 'Toutes actions' : actionLabel(a)}
-                  </option>
-                ))}
-              </select>
-
-              <Badge variant="outline">{filtered.length} / {entries.length}</Badge>
+            <div className="text-sm text-muted-foreground">
+              (Tri basé sur Total période)
             </div>
           </div>
-        </CardContent>
 
-        {/* Table */}
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{fr.history.date}</TableHead>
-                <TableHead>{fr.history.action}</TableHead>
-                <TableHead>Par</TableHead>
-                <TableHead>{fr.history.table}</TableHead>
-                <TableHead className="hidden lg:table-cell">Détails</TableHead>
-                <TableHead className="hidden md:table-cell">{fr.history.recordId}</TableHead>
-              </TableRow>
-            </TableHeader>
+          <div className="w-full rounded-xl border bg-background overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Membre</TableHead>
+                  <TableHead className="text-right">Normal</TableHead>
+                  <TableHead className="text-right">Férié</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Dernière permanence</TableHead>
+                  <TableHead className="text-right">Dernier normal</TableHead>
+                </TableRow>
+              </TableHeader>
 
-            <TableBody>
-              {filtered.map((e) => {
-                const actor =
-                  e.actor_user_id ? nameByUserId.get(e.actor_user_id) || 'Utilisateur' : '—';
+              <TableBody>
+                {summaryRows.map((m) => {
+                  const last = m.lastDutyDateUTC ? formatFrFromYYYYMMDD(format(m.lastDutyDateUTC, "yyyy-MM-dd")) : "—";
+                  const lastN = m.lastNormalDutyDateUTC
+                    ? formatFrFromYYYYMMDD(format(m.lastNormalDutyDateUTC, "yyyy-MM-dd"))
+                    : "—";
 
-                return (
-                  <TableRow key={e.id}>
-                    <TableCell>
-                      {format(new Date(e.created_at), 'dd/MM/yyyy HH:mm', { locale: frLocale })}
-                    </TableCell>
+                  return (
+                    <TableRow key={m.memberId} className="hover:bg-muted/50">
+                      <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell className="text-right">{m.periodNormal}</TableCell>
+                      <TableCell className="text-right">{m.periodHoliday}</TableCell>
+                      <TableCell className="text-right font-bold">{m.periodTotal}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">{last}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">{lastN}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
 
-                    <TableCell>
-                      <Badge variant={badgeVariant(e.action)}>
-                        {actionLabel(e.action)}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell className="text-sm">
-                      {actor}
-                    </TableCell>
-
-                    <TableCell>{e.table_name}</TableCell>
-
-                    <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-                      {renderDetails(e)}
-                    </TableCell>
-
-                    <TableCell className="hidden md:table-cell text-muted-foreground font-mono text-xs">
-                      {safeShortId(e.record_id)}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-
-          {filtered.length === 0 && (
-            <div className="p-6 text-sm text-muted-foreground">
-              Aucun résultat.
-            </div>
-          )}
+            {summaryRows.length === 0 && (
+              <div className="p-6 text-sm text-muted-foreground">Aucun résultat.</div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
-      <div className="text-xs text-muted-foreground">
-        Note: si tu veux voir exactement “avant → après”, il faut que <code>audit_log_entries</code> contienne <code>old_data</code> et <code>new_data</code>.
-        Sinon, la colonne “Détails” restera limitée.
-      </div>
+      {/* Worked days per member (the important “list of days”) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Jours travaillés — Détails par membre</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="text-sm text-muted-foreground">
+            Clique un membre pour voir la liste des jours (Normal/Férié) sur la période filtrée.
+          </div>
+
+          <div className="space-y-3">
+            {summaryRows.map((m) => {
+              const pack = daysByMember.get(m.memberId);
+              const all = pack?.all || [];
+              const normalSet = pack?.normal || new Set<string>();
+              const holidaySet = pack?.holiday || new Set<string>();
+
+              return (
+                <details key={m.memberId} className="rounded-xl border bg-background p-3">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex flex-wrap items-center gap-2 justify-between">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{m.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Normal: {m.periodNormal} • Férié: {m.periodHoliday} • Total: {m.periodTotal}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{m.periodTotal}</Badge>
+                        <span className="text-xs text-muted-foreground">ouvrir</span>
+                      </div>
+                    </div>
+                  </summary>
+
+                  <div className="mt-3 border-t pt-3">
+                    {all.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">Aucun jour sur la période.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {all.map((day) => {
+                          const isHoliday = holidaySet.has(day);
+                          const isNormal = normalSet.has(day);
+
+                          return (
+                            <span
+                              key={day}
+                              className={cn(
+                                "px-2 py-1 rounded-md border text-xs tabular-nums",
+                                isHoliday && "bg-orange-50 border-orange-200",
+                                isNormal && "bg-blue-50 border-blue-200"
+                              )}
+                              title={isHoliday ? "Férié" : "Normal"}
+                            >
+                              {formatFrFromYYYYMMDD(day)}{" "}
+                              <span className="text-[10px] text-muted-foreground">
+                                ({isHoliday ? "Férié" : "Normal"})
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
