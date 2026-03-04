@@ -94,7 +94,29 @@ function useIsMobile(breakpointPx = 768) {
 function limitForMobile<T>(arr: T[], isMobile: boolean, limit = CHART_MOBILE_LIMIT) {
   return isMobile ? arr.slice(0, limit) : arr;
 }
+async function fetchAllDutiesPaged() {
+  const pageSize = 1000;
+  let from = 0;
+  const all: any[] = [];
 
+  while (true) {
+    const { data, error } = await supabase
+      .from("duty_entries")
+      .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)")
+      .order("duty_date", { ascending: true }) // important: stable paging
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    all.push(...batch);
+
+    if (batch.length < pageSize) break; // last page
+    from += pageSize;
+  }
+
+  return all as Duty[];
+}
 // ---------------- Component ----------------
 export default function History() {
   const [loading, setLoading] = useState(true);
@@ -135,12 +157,8 @@ export default function History() {
 
       if (membersErr) throw membersErr;
 
-      // duties
-      const { data: dutiesData, error: dutiesErr } = await supabase
-        .from("duty_entries")
-        .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)");
-
-      if (dutiesErr) throw dutiesErr;
+      // duties (PAGED)
+const dutiesData = await fetchAllDutiesPaged();
 
       // holidays
       const { data: holidaysData, error: holidaysErr } = await supabase
@@ -154,6 +172,7 @@ export default function History() {
 
       setMembers(m);
       setDuties(d);
+      console.log("DUTIES FETCHED:", d.length);
 
       // default selection: all members
       setSelectedMemberIds(m.map((x) => x.id));

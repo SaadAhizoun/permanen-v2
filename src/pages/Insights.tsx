@@ -303,6 +303,7 @@ async function fetchAllDutiesPaged() {
 
   return all;
 }
+
 export default function Insights() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
@@ -350,11 +351,7 @@ export default function Insights() {
 
       if (membersErr) throw membersErr;
 
-      const { data: dutiesData, error: dutiesErr } = await supabase
-        .from("duty_entries")
-        .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)");
-
-      if (dutiesErr) throw dutiesErr;
+      const dutiesData = await fetchAllDutiesPaged();
 
       const { data: holidaysData, error: holidaysErr } = await supabase
         .from("holidays")
@@ -373,7 +370,7 @@ export default function Insights() {
 
       setMembers(m);
       setDuties(d);
-      console.log("DUTIES FETCHED:", d.length);
+      console.log("INSIGHTS DUTIES FETCHED:", d.length);
       setHolidayDatesSet(holidaySet);
 
       // default selection: all members
