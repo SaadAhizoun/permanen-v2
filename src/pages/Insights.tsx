@@ -280,6 +280,29 @@ const TD_LEFT =
 // ==========================================================
 // ======================= PAGE =============================
 // ==========================================================
+async function fetchAllDutiesPaged() {
+  const pageSize = 1000;
+  let from = 0;
+  const all: Duty[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("duty_entries")
+      .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)")
+      .order("duty_date", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = (data ?? []) as Duty[];
+    all.push(...batch);
+
+    if (batch.length < pageSize) break; // last page
+    from += pageSize;
+  }
+
+  return all;
+}
 export default function Insights() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
@@ -350,6 +373,7 @@ export default function Insights() {
 
       setMembers(m);
       setDuties(d);
+      console.log("DUTIES FETCHED:", d.length);
       setHolidayDatesSet(holidaySet);
 
       // default selection: all members
@@ -366,7 +390,7 @@ export default function Insights() {
         : todayStr;
 
       setExportFrom(minD);
-      setExportTo(maxD);
+      setExportTo(todayStr);
     } catch (e) {
       console.error(e);
     } finally {
