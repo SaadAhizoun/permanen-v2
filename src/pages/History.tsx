@@ -91,8 +91,14 @@ function useIsMobile(breakpointPx = 768) {
   return isMobile;
 }
 
-function limitForMobile<T>(arr: T[], isMobile: boolean, limit = CHART_MOBILE_LIMIT) {
-  return isMobile ? arr.slice(0, limit) : arr;
+function limitForMobile<T>(
+  arr: T[],
+  isMobile: boolean,
+  showAll: boolean,
+  limit = CHART_MOBILE_LIMIT
+) {
+  if (!isMobile) return arr;
+  return showAll ? arr : arr.slice(0, limit);
 }
 async function fetchAllDutiesPaged() {
   const pageSize = 1000;
@@ -121,6 +127,7 @@ async function fetchAllDutiesPaged() {
 export default function History() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
+  const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -424,25 +431,26 @@ const dutiesData = await fetchAllDutiesPaged();
 
   // Mobile limited chart data
   const distributionDataForChart = useMemo(
-    () => limitForMobile(distributionData, isMobile),
-    [distributionData, isMobile]
-  );
+  () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
+  [distributionData, isMobile, showAllChartsMobile]
+);
   const normalChartDataForChart = useMemo(
-    () => limitForMobile(normalChartData, isMobile),
-    [normalChartData, isMobile]
-  );
+  () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
+  [normalChartData, isMobile, showAllChartsMobile]
+);
   const holidayChartDataForChart = useMemo(
-    () => limitForMobile(holidayChartData, isMobile),
-    [holidayChartData, isMobile]
-  );
+  () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
+  [holidayChartData, isMobile, showAllChartsMobile]
+);
   const daysSinceLastDutyDataForChart = useMemo(
-    () => limitForMobile(daysSinceLastDutyData, isMobile),
-    [daysSinceLastDutyData, isMobile]
-  );
+  () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
+  [daysSinceLastDutyData, isMobile, showAllChartsMobile]
+);
   const daysSinceLastNormalDutyDataForChart = useMemo(
-    () => limitForMobile(daysSinceLastNormalDutyData, isMobile),
-    [daysSinceLastNormalDutyData, isMobile]
-  );
+  () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
+  [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
+);
+
 
   // Summary table rows (search + sort)
   const summaryRows = useMemo(() => {
@@ -669,9 +677,11 @@ const dutiesData = await fetchAllDutiesPaged();
             <CardTitle>Répartition par membre — Total (période)</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={distributionDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? distributionDataForChart.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={distributionDataForChart}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -689,14 +699,28 @@ const dutiesData = await fetchAllDutiesPaged();
                   />
                   <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
 
             {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${distributionData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
+    </Button>
+  </div>
+)}
           </CardContent>
         </Card>
 
@@ -705,9 +729,11 @@ const dutiesData = await fetchAllDutiesPaged();
             <CardTitle>Comparatif — Jours normaux (période)</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={normalChartDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? normalChartData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={normalChartData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -725,14 +751,28 @@ const dutiesData = await fetchAllDutiesPaged();
                   />
                   <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
 
             {isMobile && normalChartData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${normalChartData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
+    </Button>
+  </div>
+)}
           </CardContent>
         </Card>
 
@@ -741,9 +781,11 @@ const dutiesData = await fetchAllDutiesPaged();
             <CardTitle>Comparatif — Jours fériés (période)</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={holidayChartDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? holidayChartData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={holidayChartData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -761,14 +803,28 @@ const dutiesData = await fetchAllDutiesPaged();
                   />
                   <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
 
             {isMobile && holidayChartData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${holidayChartData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
+    </Button>
+  </div>
+)}
           </CardContent>
         </Card>
 
@@ -777,9 +833,11 @@ const dutiesData = await fetchAllDutiesPaged();
             <CardTitle>Days since last duty</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={daysSinceLastDutyDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastDutyData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daysSinceLastDutyData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -801,8 +859,10 @@ const dutiesData = await fetchAllDutiesPaged();
                   />
                   <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
 
             <div className="text-xs text-muted-foreground mt-2">
               “Jamais” = aucune permanence trouvée dans la période filtrée.
@@ -815,9 +875,11 @@ const dutiesData = await fetchAllDutiesPaged();
             <CardTitle>Days since last NORMAL duty</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={daysSinceLastNormalDutyDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastNormalDutyData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daysSinceLastNormalDutyData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -839,8 +901,10 @@ const dutiesData = await fetchAllDutiesPaged();
                   />
                   <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
           </CardContent>
         </Card>
       </div>

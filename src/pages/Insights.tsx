@@ -127,8 +127,14 @@ function headerCell(title: string, subtitle?: string) {
 // ---------- Responsive helpers ----------
 const CHART_MOBILE_LIMIT = 10;
 
-function limitForMobile<T>(arr: T[], isMobile: boolean, limit = CHART_MOBILE_LIMIT) {
-  return isMobile ? arr.slice(0, limit) : arr;
+function limitForMobile<T>(
+  arr: T[],
+  isMobile: boolean,
+  showAll: boolean,
+  limit = CHART_MOBILE_LIMIT
+) {
+  if (!isMobile) return arr;
+  return showAll ? arr : arr.slice(0, limit);
 }
 
 // -------------------- Small Components --------------------
@@ -307,6 +313,7 @@ async function fetchAllDutiesPaged() {
 export default function Insights() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
+  const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -1216,34 +1223,34 @@ export default function Insights() {
 
   // ---------- chart data with mobile limit ----------
   const distributionDataForChart = useMemo(
-    () => limitForMobile(distributionData, isMobile),
-    [distributionData, isMobile]
-  );
+  () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
+  [distributionData, isMobile, showAllChartsMobile]
+);
 
   const normalChartDataForChart = useMemo(
-    () => limitForMobile(normalChartData, isMobile),
-    [normalChartData, isMobile]
-  );
+  () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
+  [normalChartData, isMobile, showAllChartsMobile]
+);
 
   const holidayChartDataForChart = useMemo(
-    () => limitForMobile(holidayChartData, isMobile),
-    [holidayChartData, isMobile]
-  );
+  () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
+  [holidayChartData, isMobile, showAllChartsMobile]
+);
 
   const daysSinceLastDutyDataForChart = useMemo(
-    () => limitForMobile(daysSinceLastDutyData, isMobile),
-    [daysSinceLastDutyData, isMobile]
-  );
+  () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
+  [daysSinceLastDutyData, isMobile, showAllChartsMobile]
+);
 
   const daysSinceLastNormalDutyDataForChart = useMemo(
-    () => limitForMobile(daysSinceLastNormalDutyData, isMobile),
-    [daysSinceLastNormalDutyData, isMobile]
-  );
+  () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
+  [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
+);
 
   const daysSinceLastHolidayDutyDataForChart = useMemo(
-    () => limitForMobile(daysSinceLastHolidayDutyData, isMobile),
-    [daysSinceLastHolidayDutyData, isMobile]
-  );
+  () => limitForMobile(daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile),
+  [daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile]
+);
 
   if (loading) return <Skeleton className="h-96 w-full" />;
 
@@ -1456,9 +1463,11 @@ export default function Insights() {
 
           <CardContent className="overflow-hidden">
             <div ref={refChartTotal} className="w-full">
-              <div className="h-[260px] md:h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={distributionDataForChart}>
+              <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? distributionDataForChart.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={distributionDataForChart}>
                     <XAxis
                       dataKey="name"
                       interval={0}
@@ -1480,15 +1489,29 @@ export default function Insights() {
                     />
                     <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
-              </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
             </div>
 
             {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${distributionData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
+    </Button>
+  </div>
+)}
 
             <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-2">
               {/* Top Most */}
@@ -1631,9 +1654,11 @@ export default function Insights() {
 
           <CardContent className="overflow-hidden">
             <div ref={refChartNormal} className="w-full">
-              <div className="h-[260px] md:h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={normalChartDataForChart}>
+              <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? normalChartData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={normalChartData}>
                     <XAxis
                       dataKey="name"
                       interval={0}
@@ -1655,15 +1680,29 @@ export default function Insights() {
                     />
                     <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
-              </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
             </div>
 
             {isMobile && normalChartData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${normalChartData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
+    </Button>
+  </div>
+)}
           </CardContent>
         </Card>
 
@@ -1674,9 +1713,11 @@ export default function Insights() {
 
           <CardContent className="overflow-hidden">
             <div ref={refChartHoliday} className="w-full">
-              <div className="h-[260px] md:h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={holidayChartDataForChart}>
+              <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? holidayChartData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={holidayChartData}>
                     <XAxis
                       dataKey="name"
                       interval={0}
@@ -1698,15 +1739,29 @@ export default function Insights() {
                     />
                     <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
-              </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
             </div>
 
             {isMobile && holidayChartData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 text-xs text-muted-foreground">
-                Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-              </div>
-            )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${holidayChartData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
+    </Button>
+  </div>
+)}
           </CardContent>
         </Card>
       </div>
@@ -1911,9 +1966,11 @@ export default function Insights() {
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={daysSinceLastDutyDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastDutyData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daysSinceLastDutyData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -1935,15 +1992,29 @@ export default function Insights() {
                   />
                   <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
           </div>
 
           {isMobile && daysSinceLastDutyData.length > CHART_MOBILE_LIMIT && (
-            <div className="mt-2 text-xs text-muted-foreground">
-              Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-            </div>
-          )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${daysSinceLastDutyData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastDutyData.length})`}
+    </Button>
+  </div>
+)}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = personne non planifiée depuis longtemps. “Jamais” est volontairement mis très haut.
@@ -1958,9 +2029,11 @@ export default function Insights() {
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={daysSinceLastNormalDutyDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastNormalDutyData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daysSinceLastNormalDutyData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -1982,15 +2055,29 @@ export default function Insights() {
                   />
                   <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
           </div>
 
           {isMobile && daysSinceLastNormalDutyData.length > CHART_MOBILE_LIMIT && (
-            <div className="mt-2 text-xs text-muted-foreground">
-              Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-            </div>
-          )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${daysSinceLastNormalDutyData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastNormalDutyData.length})`}
+    </Button>
+  </div>
+)}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour normal depuis longtemps.
@@ -2005,9 +2092,11 @@ export default function Insights() {
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
-            <div className="h-[260px] md:h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={daysSinceLastHolidayDutyDataForChart}>
+            <div className="overflow-x-auto">
+  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastHolidayDutyData.length * 60 : 0 }}>
+    <div className="h-[260px] md:h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daysSinceLastHolidayDutyData}>
                   <XAxis
                     dataKey="name"
                     interval={0}
@@ -2029,15 +2118,29 @@ export default function Insights() {
                   />
                   <Bar dataKey="days" fill="#F97316" radius={[6, 6, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+      </ResponsiveContainer>
+    </div>
+  </div>
+</div>
           </div>
 
           {isMobile && daysSinceLastHolidayDutyData.length > CHART_MOBILE_LIMIT && (
-            <div className="mt-2 text-xs text-muted-foreground">
-              Affichage limité aux {CHART_MOBILE_LIMIT} premiers sur mobile.
-            </div>
-          )}
+  <div className="mt-2 flex items-center justify-between gap-2">
+    <div className="text-xs text-muted-foreground">
+      {showAllChartsMobile
+        ? `Affichage complet (${daysSinceLastHolidayDutyData.length}).`
+        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+    </div>
+
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowAllChartsMobile((v) => !v)}
+    >
+      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastHolidayDutyData.length})`}
+    </Button>
+  </div>
+)}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour férié depuis longtemps.
