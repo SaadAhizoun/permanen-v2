@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 
 import { differenceInCalendarDays, format } from "date-fns";
@@ -79,8 +80,10 @@ function formatFrFromYYYYMMDD(dateStr: string) {
 }
 
 const CHART_MOBILE_LIMIT = 10;
+
 function useIsMobile(breakpointPx = 768) {
   const [isMobile, setIsMobile] = useState(false);
+
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
     const onChange = () => setIsMobile(mq.matches);
@@ -88,6 +91,7 @@ function useIsMobile(breakpointPx = 768) {
     mq.addEventListener?.("change", onChange);
     return () => mq.removeEventListener?.("change", onChange);
   }, [breakpointPx]);
+
   return isMobile;
 }
 
@@ -100,6 +104,7 @@ function limitForMobile<T>(
   if (!isMobile) return arr;
   return showAll ? arr : arr.slice(0, limit);
 }
+
 async function fetchAllDutiesPaged() {
   const pageSize = 1000;
   let from = 0;
@@ -109,7 +114,7 @@ async function fetchAllDutiesPaged() {
     const { data, error } = await supabase
       .from("duty_entries")
       .select("duty_date, duty_type, team_member_id, team_member:team_members(id, full_name)")
-      .order("duty_date", { ascending: true }) // important: stable paging
+      .order("duty_date", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) throw error;
@@ -117,12 +122,13 @@ async function fetchAllDutiesPaged() {
     const batch = data ?? [];
     all.push(...batch);
 
-    if (batch.length < pageSize) break; // last page
+    if (batch.length < pageSize) break;
     from += pageSize;
   }
 
   return all as Duty[];
 }
+
 // ---------------- Component ----------------
 export default function History() {
   const [loading, setLoading] = useState(true);
@@ -145,17 +151,12 @@ export default function History() {
   const [q, setQ] = useState("");
   const [tableAsc, setTableAsc] = useState(false);
 
-  /**
-   * ✅ Weekend counted as holiday (same as Insights)
-   * If you want weekend NOT holiday, set false.
-   */
   const COUNT_WEEKEND_AS_HOLIDAY = true;
 
   const fetchAll = async () => {
     try {
       setLoading(true);
 
-      // members
       const { data: membersData, error: membersErr } = await supabase
         .from("team_members")
         .select("id, full_name")
@@ -164,10 +165,8 @@ export default function History() {
 
       if (membersErr) throw membersErr;
 
-      // duties (PAGED)
-const dutiesData = await fetchAllDutiesPaged();
+      const dutiesData = await fetchAllDutiesPaged();
 
-      // holidays
       const { data: holidaysData, error: holidaysErr } = await supabase
         .from("holidays")
         .select("date");
@@ -179,9 +178,6 @@ const dutiesData = await fetchAllDutiesPaged();
 
       setMembers(m);
       setDuties(d);
-      console.log("DUTIES FETCHED:", d.length);
-
-      // default selection: all members
       setSelectedMemberIds(m.map((x) => x.id));
 
       const holidaySet = new Set<string>(
@@ -191,7 +187,6 @@ const dutiesData = await fetchAllDutiesPaged();
       );
       setHolidayDatesSet(holidaySet);
 
-      // default range = min/max duty_date
       const allDutyDates = d.map((x) => clampDateStr(x.duty_date)).filter(Boolean);
       const minD = allDutyDates.length
         ? allDutyDates.reduce((a, b) => (a < b ? a : b))
@@ -211,7 +206,6 @@ const dutiesData = await fetchAllDutiesPaged();
 
   useEffect(() => {
     void fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleMember = (memberId: string) => {
@@ -229,7 +223,6 @@ const dutiesData = await fetchAllDutiesPaged();
   const selectedCountLabel =
     selectedMemberIds.length === 0 ? members.length : selectedMemberIds.length;
 
-  // --- Filter duties by member selection
   const filteredByMembers = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const set = new Set(selectedMemberIds);
@@ -241,7 +234,6 @@ const dutiesData = await fetchAllDutiesPaged();
     });
   }, [duties, selectedMemberIds]);
 
-  // --- Filter duties by period (THIS is the main filter)
   const periodDuties = useMemo(() => {
     const from = clampDateStr(periodFrom);
     const to = clampDateStr(periodTo);
@@ -256,7 +248,6 @@ const dutiesData = await fetchAllDutiesPaged();
     });
   }, [filteredByMembers, periodFrom, periodTo]);
 
-  // --- Build per-member worked-day lists + counts (NO solde here)
   const perMember = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
@@ -266,15 +257,12 @@ const dutiesData = await fetchAllDutiesPaged();
       {
         memberId: string;
         name: string;
-        // counts in period
         periodNormal: number;
         periodHoliday: number;
         periodTotal: number;
-        // lists in period
         daysNormal: string[];
         daysHoliday: string[];
         daysAll: string[];
-        // last in period
         lastDutyDateUTC: Date | null;
         lastNormalDutyDateUTC: Date | null;
       }
@@ -316,7 +304,6 @@ const dutiesData = await fetchAllDutiesPaged();
       map[mid].periodTotal += 1;
       map[mid].daysAll.push(dayKey);
 
-      // last duty
       const prevLast = map[mid].lastDutyDateUTC;
       if (!prevLast || dt > prevLast) map[mid].lastDutyDateUTC = dt;
 
@@ -327,13 +314,13 @@ const dutiesData = await fetchAllDutiesPaged();
         map[mid].periodNormal += 1;
         map[mid].daysNormal.push(dayKey);
 
-        // last normal duty
         const prevLastNormal = map[mid].lastNormalDutyDateUTC;
-        if (!prevLastNormal || dt > prevLastNormal) map[mid].lastNormalDutyDateUTC = dt;
+        if (!prevLastNormal || dt > prevLastNormal) {
+          map[mid].lastNormalDutyDateUTC = dt;
+        }
       }
     }
 
-    // sort day lists ascending for display
     for (const k of Object.keys(map)) {
       map[k].daysAll.sort();
       map[k].daysNormal.sort();
@@ -343,7 +330,6 @@ const dutiesData = await fetchAllDutiesPaged();
     return Object.values(map);
   }, [members, periodDuties, selectedMemberIds, holidayDatesSet]);
 
-  // KPIs (period only)
   const kpis = useMemo(() => {
     const total = perMember.reduce((s, m) => s + m.periodTotal, 0);
     const normal = perMember.reduce((s, m) => s + m.periodNormal, 0);
@@ -358,7 +344,6 @@ const dutiesData = await fetchAllDutiesPaged();
     };
   }, [perMember]);
 
-  // Charts data
   const distributionData = useMemo(() => {
     return [...perMember]
       .map((m) => ({
@@ -392,7 +377,21 @@ const dutiesData = await fetchAllDutiesPaged();
       .sort((a, b) => b.count - a.count);
   }, [perMember]);
 
-  // Days since (based on period last duty dates)
+  const avgTotal = useMemo(() => {
+    if (!perMember.length) return 0;
+    return perMember.reduce((s, m) => s + m.periodTotal, 0) / perMember.length;
+  }, [perMember]);
+
+  const avgNormal = useMemo(() => {
+    if (!perMember.length) return 0;
+    return perMember.reduce((s, m) => s + m.periodNormal, 0) / perMember.length;
+  }, [perMember]);
+
+  const avgHoliday = useMemo(() => {
+    if (!perMember.length) return 0;
+    return perMember.reduce((s, m) => s + m.periodHoliday, 0) / perMember.length;
+  }, [perMember]);
+
   const daysSinceLastDutyData = useMemo(() => {
     const now = new Date();
     return [...perMember]
@@ -403,7 +402,7 @@ const dutiesData = await fetchAllDutiesPaged();
           memberId: m.memberId,
           name: shortName(m.name),
           fullName: m.name,
-          days: days ?? 9999, // "Jamais" high bar
+          days: days ?? 9999,
           hasValue: days !== null,
         };
       })
@@ -429,30 +428,31 @@ const dutiesData = await fetchAllDutiesPaged();
       .sort((a, b) => b.days - a.days);
   }, [perMember]);
 
-  // Mobile limited chart data
   const distributionDataForChart = useMemo(
-  () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
-  [distributionData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
+    [distributionData, isMobile, showAllChartsMobile]
+  );
+
   const normalChartDataForChart = useMemo(
-  () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
-  [normalChartData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
+    [normalChartData, isMobile, showAllChartsMobile]
+  );
+
   const holidayChartDataForChart = useMemo(
-  () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
-  [holidayChartData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
+    [holidayChartData, isMobile, showAllChartsMobile]
+  );
+
   const daysSinceLastDutyDataForChart = useMemo(
-  () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
-  [daysSinceLastDutyData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
+    [daysSinceLastDutyData, isMobile, showAllChartsMobile]
+  );
+
   const daysSinceLastNormalDutyDataForChart = useMemo(
-  () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
-  [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
+    [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
+  );
 
-
-  // Summary table rows (search + sort)
   const summaryRows = useMemo(() => {
     const s = q.trim().toLowerCase();
     const rows = perMember.filter((m) => m.name.toLowerCase().includes(s));
@@ -462,7 +462,6 @@ const dutiesData = await fetchAllDutiesPaged();
     return rows;
   }, [perMember, q, tableAsc]);
 
-  // For “list of days worked by person” – clean grouping
   const daysByMember = useMemo(() => {
     const map = new Map<string, { all: string[]; normal: Set<string>; holiday: Set<string> }>();
     perMember.forEach((m) => {
@@ -479,7 +478,6 @@ const dutiesData = await fetchAllDutiesPaged();
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
           <div className="text-xl md:text-2xl font-bold">Historique — Permanences</div>
@@ -504,7 +502,6 @@ const dutiesData = await fetchAllDutiesPaged();
         </div>
       </div>
 
-      {/* Sticky filters */}
       <Card className="md:sticky md:top-2 z-10">
         <CardContent className="py-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -537,7 +534,6 @@ const dutiesData = await fetchAllDutiesPaged();
               {filterOpen ? "Fermer" : "Choisir des membres"}
             </Button>
 
-            {/* Date range */}
             <div className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
                 <div className="text-[11px] text-muted-foreground">Du</div>
@@ -591,7 +587,6 @@ const dutiesData = await fetchAllDutiesPaged();
             </div>
           </div>
 
-          {/* Members picker */}
           {filterOpen && (
             <div className="mt-4 border rounded-lg p-3">
               <div className="relative w-full">
@@ -635,7 +630,6 @@ const dutiesData = await fetchAllDutiesPaged();
         </CardContent>
       </Card>
 
-      {/* KPI Cards */}
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
         <Card>
           <CardContent className="py-4 md:py-5">
@@ -670,7 +664,6 @@ const dutiesData = await fetchAllDutiesPaged();
         </Card>
       </div>
 
-      {/* Charts */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -678,49 +671,68 @@ const dutiesData = await fetchAllDutiesPaged();
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? distributionDataForChart.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={distributionDataForChart}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any) => [`${value}`, "Total (période)"]}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div
+                style={{
+                  minWidth:
+                    isMobile && showAllChartsMobile
+                      ? distributionDataForChart.length * 60
+                      : 0,
+                }}
+              >
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={distributionDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={0}
+                        angle={isMobile ? -25 : -35}
+                        textAnchor="end"
+                        height={isMobile ? 60 : 80}
+                        fontSize={isMobile ? 10 : 12}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any) => [`${value}`, "Total (période)"]}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
+                      <ReferenceLine
+                        y={avgTotal}
+                        stroke="#111827"
+                        strokeWidth={3}
+                        label={{
+                          value: `Moyenne: ${avgTotal.toFixed(1)}`,
+                          position: "top",
+                          fill: "#111827",
+                          fontSize: 14,
+                          fontWeight: 700,
+                        }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
 
             {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${distributionData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${distributionData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -730,49 +742,68 @@ const dutiesData = await fetchAllDutiesPaged();
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? normalChartData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={normalChartData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any) => [`${value}`, "Jours normaux"]}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div
+                style={{
+                  minWidth:
+                    isMobile && showAllChartsMobile
+                      ? normalChartDataForChart.length * 60
+                      : 0,
+                }}
+              >
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={normalChartDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={0}
+                        angle={isMobile ? -25 : -35}
+                        textAnchor="end"
+                        height={isMobile ? 60 : 80}
+                        fontSize={isMobile ? 10 : 12}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any) => [`${value}`, "Jours normaux"]}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                      <ReferenceLine
+                        y={avgNormal}
+                        stroke="#111827"
+                        strokeWidth={3}
+                        label={{
+                          value: `Moyenne: ${avgNormal.toFixed(1)}`,
+                          position: "top",
+                          fill: "#111827",
+                          fontSize: 14,
+                          fontWeight: 700,
+                        }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
 
             {isMobile && normalChartData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${normalChartData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${normalChartData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -782,49 +813,68 @@ const dutiesData = await fetchAllDutiesPaged();
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? holidayChartData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={holidayChartData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any) => [`${value}`, "Jours fériés"]}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div
+                style={{
+                  minWidth:
+                    isMobile && showAllChartsMobile
+                      ? holidayChartDataForChart.length * 60
+                      : 0,
+                }}
+              >
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={holidayChartDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={0}
+                        angle={isMobile ? -25 : -35}
+                        textAnchor="end"
+                        height={isMobile ? 60 : 80}
+                        fontSize={isMobile ? 10 : 12}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any) => [`${value}`, "Jours fériés"]}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
+                      <ReferenceLine
+                        y={avgHoliday}
+                        stroke="#111827"
+                        strokeWidth={3}
+                        label={{
+                          value: `Moyenne: ${avgHoliday.toFixed(1)}`,
+                          position: "top",
+                          fill: "#111827",
+                          fontSize: 14,
+                          fontWeight: 700,
+                        }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
 
             {isMobile && holidayChartData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${holidayChartData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${holidayChartData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -834,35 +884,42 @@ const dutiesData = await fetchAllDutiesPaged();
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastDutyData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={daysSinceLastDutyData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const hasValue = props?.payload?.hasValue;
-                      if (!hasValue) return ["Jamais", "Jours"];
-                      return [value, "Jours"];
-                    }}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div
+                style={{
+                  minWidth:
+                    isMobile && showAllChartsMobile
+                      ? daysSinceLastDutyDataForChart.length * 60
+                      : 0,
+                }}
+              >
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daysSinceLastDutyDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={0}
+                        angle={isMobile ? -25 : -35}
+                        textAnchor="end"
+                        height={isMobile ? 60 : 80}
+                        fontSize={isMobile ? 10 : 12}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, _name: any, props: any) => {
+                          const hasValue = props?.payload?.hasValue;
+                          if (!hasValue) return ["Jamais", "Jours"];
+                          return [value, "Jours"];
+                        }}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
 
             <div className="text-xs text-muted-foreground mt-2">
               “Jamais” = aucune permanence trouvée dans la période filtrée.
@@ -876,40 +933,46 @@ const dutiesData = await fetchAllDutiesPaged();
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastNormalDutyData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={daysSinceLastNormalDutyData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const hasValue = props?.payload?.hasValue;
-                      if (!hasValue) return ["Jamais", "Jours"];
-                      return [value, "Jours"];
-                    }}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div
+                style={{
+                  minWidth:
+                    isMobile && showAllChartsMobile
+                      ? daysSinceLastNormalDutyDataForChart.length * 60
+                      : 0,
+                }}
+              >
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daysSinceLastNormalDutyDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={0}
+                        angle={isMobile ? -25 : -35}
+                        textAnchor="end"
+                        height={isMobile ? 60 : 80}
+                        fontSize={isMobile ? 10 : 12}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, _name: any, props: any) => {
+                          const hasValue = props?.payload?.hasValue;
+                          if (!hasValue) return ["Jamais", "Jours"];
+                          return [value, "Jours"];
+                        }}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Summary table */}
       <Card>
         <CardHeader>
           <CardTitle>Résumé — Par membre</CardTitle>
@@ -954,7 +1017,10 @@ const dutiesData = await fetchAllDutiesPaged();
 
               <TableBody>
                 {summaryRows.map((m) => {
-                  const last = m.lastDutyDateUTC ? formatFrFromYYYYMMDD(format(m.lastDutyDateUTC, "yyyy-MM-dd")) : "—";
+                  const last = m.lastDutyDateUTC
+                    ? formatFrFromYYYYMMDD(format(m.lastDutyDateUTC, "yyyy-MM-dd"))
+                    : "—";
+
                   const lastN = m.lastNormalDutyDateUTC
                     ? formatFrFromYYYYMMDD(format(m.lastNormalDutyDateUTC, "yyyy-MM-dd"))
                     : "—";
@@ -965,8 +1031,12 @@ const dutiesData = await fetchAllDutiesPaged();
                       <TableCell className="text-right">{m.periodNormal}</TableCell>
                       <TableCell className="text-right">{m.periodHoliday}</TableCell>
                       <TableCell className="text-right font-bold">{m.periodTotal}</TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">{last}</TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">{lastN}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">
+                        {last}
+                      </TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">
+                        {lastN}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -980,7 +1050,6 @@ const dutiesData = await fetchAllDutiesPaged();
         </CardContent>
       </Card>
 
-      {/* Worked days per member (the important “list of days”) */}
       <Card>
         <CardHeader>
           <CardTitle>Jours travaillés — Détails par membre</CardTitle>
@@ -1017,7 +1086,9 @@ const dutiesData = await fetchAllDutiesPaged();
 
                   <div className="mt-3 border-t pt-3">
                     {all.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">Aucun jour sur la période.</div>
+                      <div className="text-sm text-muted-foreground">
+                        Aucun jour sur la période.
+                      </div>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {all.map((day) => {

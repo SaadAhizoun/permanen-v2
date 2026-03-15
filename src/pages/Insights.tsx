@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -34,6 +42,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 
 import { format, differenceInCalendarDays } from "date-fns";
@@ -95,7 +104,7 @@ function shortName(full: string) {
 }
 
 /**
- * ✅ DB stores date-only: "YYYY-MM-DD"
+ * DB stores date-only: "YYYY-MM-DD"
  * We must NEVER do new Date("YYYY-MM-DD") because it can shift day by timezone.
  */
 function parseDateOnlyUTC(dateStr: string) {
@@ -137,6 +146,21 @@ function limitForMobile<T>(
   return showAll ? arr : arr.slice(0, limit);
 }
 
+function getChartXAxisProps(isMobile: boolean) {
+  return {
+    interval: isMobile ? 1 : 0,
+    angle: isMobile ? -35 : -30,
+    textAnchor: "end" as const,
+    height: isMobile ? 78 : 92,
+    fontSize: isMobile ? 10 : 11,
+    tickMargin: 8,
+  };
+}
+
+function getChartMinWidth(itemCount: number, isMobile: boolean) {
+  return Math.max(isMobile ? 620 : 900, itemCount * (isMobile ? 58 : 42));
+}
+
 // -------------------- Small Components --------------------
 function KpiCard({
   label,
@@ -166,12 +190,8 @@ function TotalsMobileCards({
   rows: Array<{
     memberId: string;
     name: string;
-    baseNormal: number;
-    baseHoliday: number;
-    baseTotal: number;
-    periodNormal: number;
-    periodHoliday: number;
-    periodTotal: number;
+    totalNormal: number;
+    totalHoliday: number;
     total: number;
   }>;
 }) {
@@ -184,7 +204,7 @@ function TotalsMobileCards({
               <div className="min-w-0">
                 <div className="font-semibold truncate">{r.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  Solde: {r.baseTotal} • Période: {r.periodTotal}
+                  Normaux: {r.totalNormal} • Fériés: {r.totalHoliday}
                 </div>
               </div>
               <div className="text-2xl font-bold tabular-nums">{r.total}</div>
@@ -192,20 +212,12 @@ function TotalsMobileCards({
 
             <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
               <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Solde normal</div>
-                <div className="font-semibold tabular-nums">{r.baseNormal}</div>
+                <div className="text-xs text-muted-foreground">Total jours normaux</div>
+                <div className="font-semibold tabular-nums">{r.totalNormal}</div>
               </div>
               <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Solde férié</div>
-                <div className="font-semibold tabular-nums">{r.baseHoliday}</div>
-              </div>
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Période normal</div>
-                <div className="font-semibold tabular-nums">{r.periodNormal}</div>
-              </div>
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Période férié</div>
-                <div className="font-semibold tabular-nums">{r.periodHoliday}</div>
+                <div className="text-xs text-muted-foreground">Total jours fériés</div>
+                <div className="font-semibold tabular-nums">{r.totalHoliday}</div>
               </div>
             </div>
           </CardContent>
@@ -275,7 +287,7 @@ function MatrixMobileCards({
 }
 
 // ------------------ Sticky table helpers ------------------
-const NAME_COL_W = "w-[240px] min-w-[240px]";
+const NAME_COL_W = "w-[160px] min-w-[160px]";
 const TH_TOP_LEFT = "sticky top-0 left-0 z-50 bg-background " + NAME_COL_W;
 const TH_TOP = "sticky top-0 z-40 bg-background";
 const TD_LEFT =
@@ -303,7 +315,7 @@ async function fetchAllDutiesPaged() {
     const batch = (data ?? []) as Duty[];
     all.push(...batch);
 
-    if (batch.length < pageSize) break; // last page
+    if (batch.length < pageSize) break;
     from += pageSize;
   }
 
@@ -314,6 +326,8 @@ export default function Insights() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
   const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
+
+  const chartXAxisProps = getChartXAxisProps(isMobile);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -326,7 +340,21 @@ export default function Insights() {
   const [tableSearch, setTableSearch] = useState("");
   const [matrixSearch, setMatrixSearch] = useState("");
   const [matrixOnlyActive, setMatrixOnlyActive] = useState(false);
-  const [tableAsc, setTableAsc] = useState(true);
+
+  const [tableSortBy, setTableSortBy] = useState<
+    "name" | "totalNormal" | "totalHoliday" | "total"
+  >("total");
+
+  const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
+
+  const [filterTotalNormalMin, setFilterTotalNormalMin] = useState("");
+  const [filterTotalNormalMax, setFilterTotalNormalMax] = useState("");
+
+  const [filterTotalHolidayMin, setFilterTotalHolidayMin] = useState("");
+  const [filterTotalHolidayMax, setFilterTotalHolidayMax] = useState("");
+
+  const [filterTotalGlobalMin, setFilterTotalGlobalMin] = useState("");
+  const [filterTotalGlobalMax, setFilterTotalGlobalMax] = useState("");
 
   // Export dialog
   const [exportOpen, setExportOpen] = useState(false);
@@ -380,17 +408,12 @@ export default function Insights() {
       console.log("INSIGHTS DUTIES FETCHED:", d.length);
       setHolidayDatesSet(holidaySet);
 
-      // default selection: all members
       setSelectedMemberIds(m.map((x) => x.id));
 
-      // default export range = min/max duty_date
       const allDutyDates = d.map((x) => clampDateStr(x.duty_date)).filter(Boolean);
       const todayStr = format(new Date(), "yyyy-MM-dd");
       const minD = allDutyDates.length
         ? allDutyDates.reduce((a, b) => (a < b ? a : b))
-        : todayStr;
-      const maxD = allDutyDates.length
-        ? allDutyDates.reduce((a, b) => (a > b ? a : b))
         : todayStr;
 
       setExportFrom(minD);
@@ -428,7 +451,6 @@ export default function Insights() {
     });
   }, [duties, selectedMemberIds]);
 
-  // apply export range on top of filtered duties
   const exportDuties = useMemo(() => {
     const from = clampDateStr(exportFrom);
     const to = clampDateStr(exportTo);
@@ -440,7 +462,6 @@ export default function Insights() {
     });
   }, [filteredDuties, exportFrom, exportTo]);
 
-  /** ✅ If you want WEEKEND to be counted as "Férié" too: keep true */
   const COUNT_WEEKEND_AS_HOLIDAY = true;
 
   const perMemberStats = useMemo(() => {
@@ -584,6 +605,16 @@ export default function Insights() {
       .sort((a, b) => b.count - a.count);
   }, [perMemberStats]);
 
+  const avgNormalGlobal = useMemo(() => {
+    if (!normalChartData.length) return 0;
+    return normalChartData.reduce((sum, item) => sum + item.count, 0) / normalChartData.length;
+  }, [normalChartData]);
+
+  const avgHolidayGlobal = useMemo(() => {
+    if (!holidayChartData.length) return 0;
+    return holidayChartData.reduce((sum, item) => sum + item.count, 0) / holidayChartData.length;
+  }, [holidayChartData]);
+
   const top3Most = useMemo(
     () => [...perMemberStats].sort((a, b) => b.total - a.total).slice(0, 3),
     [perMemberStats]
@@ -610,14 +641,6 @@ export default function Insights() {
     if (fairnessGap <= 5) return { label: "Moyen", cls: "bg-yellow-500 text-white" };
     return { label: "Déséquilibré", cls: "bg-red-600 text-white" };
   }, [fairnessGap]);
-
-  const totalsTableRows = useMemo(() => {
-    const rows = [...perMemberStats].filter((r) =>
-      r.name.toLowerCase().includes(tableSearch.toLowerCase())
-    );
-    rows.sort((a, b) => (tableAsc ? a.total - b.total : b.total - a.total));
-    return rows;
-  }, [perMemberStats, tableSearch, tableAsc]);
 
   /** ✅ Matrix for PERIOD by weekday + adds Solde columns + Total global */
   const weekdayMatrix = useMemo(() => {
@@ -729,6 +752,12 @@ export default function Insights() {
       .sort((a, b) => b.days - a.days);
   }, [exportDuties, members, selectedMemberIds]);
 
+  const daysSinceLastDutyByMember = useMemo(() => {
+    return new Map(
+      daysSinceLastDutyData.map((item) => [item.memberId, item.hasValue ? item.days : -1])
+    );
+  }, [daysSinceLastDutyData]);
+
   const daysSinceLastNormalDutyData = useMemo(() => {
     const now = new Date();
     const lastDateByMember = new Map<string, Date>();
@@ -807,6 +836,86 @@ export default function Insights() {
       .sort((a, b) => b.days - a.days);
   }, [exportDuties, members, holidayDatesSet, selectedMemberIds]);
 
+  const totalsTableRows = useMemo(() => {
+    const search = tableSearch.trim().toLowerCase();
+
+    const totalNormalMin =
+      filterTotalNormalMin === "" ? null : Number(filterTotalNormalMin);
+    const totalNormalMax =
+      filterTotalNormalMax === "" ? null : Number(filterTotalNormalMax);
+
+    const totalHolidayMin =
+      filterTotalHolidayMin === "" ? null : Number(filterTotalHolidayMin);
+    const totalHolidayMax =
+      filterTotalHolidayMax === "" ? null : Number(filterTotalHolidayMax);
+
+    const totalGlobalMin =
+      filterTotalGlobalMin === "" ? null : Number(filterTotalGlobalMin);
+    const totalGlobalMax =
+      filterTotalGlobalMax === "" ? null : Number(filterTotalGlobalMax);
+
+    const rows = [...perMemberStats]
+      .map((r) => ({
+        memberId: r.memberId,
+        name: r.name,
+        totalNormal: r.baseNormal + r.periodNormal,
+        totalHoliday: r.baseHoliday + r.periodHoliday,
+        total: r.total,
+      }))
+      .filter((r) => r.name.toLowerCase().includes(search))
+      .filter((r) => (totalNormalMin === null ? true : r.totalNormal >= totalNormalMin))
+      .filter((r) => (totalNormalMax === null ? true : r.totalNormal <= totalNormalMax))
+      .filter((r) => (totalHolidayMin === null ? true : r.totalHoliday >= totalHolidayMin))
+      .filter((r) => (totalHolidayMax === null ? true : r.totalHoliday <= totalHolidayMax))
+      .filter((r) => (totalGlobalMin === null ? true : r.total >= totalGlobalMin))
+      .filter((r) => (totalGlobalMax === null ? true : r.total <= totalGlobalMax));
+
+    rows.sort((a, b) => {
+      const direction = tableSortOrder === "asc" ? 1 : -1;
+
+      if (tableSortBy === "name") {
+        return a.name.localeCompare(b.name) * direction;
+      }
+
+      const av = Number(a[tableSortBy]) || 0;
+      const bv = Number(b[tableSortBy]) || 0;
+
+      const primarySort = (av - bv) * direction;
+      if (primarySort !== 0) return primarySort;
+
+      const aLastDuty = daysSinceLastDutyByMember.get(a.memberId) ?? -1;
+      const bLastDuty = daysSinceLastDutyByMember.get(b.memberId) ?? -1;
+
+      return bLastDuty - aLastDuty;
+    });
+
+    return rows;
+  }, [
+    perMemberStats,
+    tableSearch,
+    tableSortBy,
+    tableSortOrder,
+    filterTotalNormalMin,
+    filterTotalNormalMax,
+    filterTotalHolidayMin,
+    filterTotalHolidayMax,
+    filterTotalGlobalMin,
+    filterTotalGlobalMax,
+    daysSinceLastDutyByMember,
+  ]);
+
+  const resetTotalsFilters = () => {
+    setTableSearch("");
+    setTableSortBy("total");
+    setTableSortOrder("desc");
+    setFilterTotalNormalMin("");
+    setFilterTotalNormalMax("");
+    setFilterTotalHolidayMin("");
+    setFilterTotalHolidayMax("");
+    setFilterTotalGlobalMin("");
+    setFilterTotalGlobalMax("");
+  };
+
   const recommendations = useMemo(() => {
     if (perMemberStats.length === 0) return [];
 
@@ -858,7 +967,6 @@ export default function Insights() {
     const wb = XLSX.utils.book_new();
     const generatedAt = format(new Date(), "dd/MM/yyyy HH:mm", { locale: frLocale });
 
-    // Sheet 1: Summary
     const summaryRows: any[][] = [
       ["RAPPORT PERMANENCES"],
       ["Période", `${clampDateStr(exportFrom) || "…"} → ${clampDateStr(exportTo) || "…"}`],
@@ -881,7 +989,6 @@ export default function Insights() {
     ws1["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
     XLSX.utils.book_append_sheet(wb, ws1, "Résumé");
 
-    // Sheet 2: Totals
     const totalsHeader = [
       [
         "Membre",
@@ -925,7 +1032,6 @@ export default function Insights() {
     ];
     XLSX.utils.book_append_sheet(wb, ws2, "Totaux");
 
-    // Sheet 3: Matrix
     if (exportIncludeMatrix) {
       const matrixHeader = [
         [
@@ -962,7 +1068,6 @@ export default function Insights() {
       XLSX.utils.book_append_sheet(wb, ws3, "Matrice");
     }
 
-    // Sheet 4: Raw
     if (exportIncludeRaw) {
       const rawHeader = [["Date", "Jour", "Membre", "Type", "Férié?", "Week-end?"]];
 
@@ -1223,38 +1328,37 @@ export default function Insights() {
 
   // ---------- chart data with mobile limit ----------
   const distributionDataForChart = useMemo(
-  () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
-  [distributionData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
+    [distributionData, isMobile, showAllChartsMobile]
+  );
 
   const normalChartDataForChart = useMemo(
-  () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
-  [normalChartData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(normalChartData, isMobile, showAllChartsMobile),
+    [normalChartData, isMobile, showAllChartsMobile]
+  );
 
   const holidayChartDataForChart = useMemo(
-  () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
-  [holidayChartData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(holidayChartData, isMobile, showAllChartsMobile),
+    [holidayChartData, isMobile, showAllChartsMobile]
+  );
 
   const daysSinceLastDutyDataForChart = useMemo(
-  () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
-  [daysSinceLastDutyData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(daysSinceLastDutyData, isMobile, showAllChartsMobile),
+    [daysSinceLastDutyData, isMobile, showAllChartsMobile]
+  );
 
   const daysSinceLastNormalDutyDataForChart = useMemo(
-  () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
-  [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(daysSinceLastNormalDutyData, isMobile, showAllChartsMobile),
+    [daysSinceLastNormalDutyData, isMobile, showAllChartsMobile]
+  );
 
   const daysSinceLastHolidayDutyDataForChart = useMemo(
-  () => limitForMobile(daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile),
-  [daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile]
-);
+    () => limitForMobile(daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile),
+    [daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile]
+  );
 
   if (loading) return <Skeleton className="h-96 w-full" />;
 
-  // Matrix rows filtered once
   const matrixRowsFiltered = weekdayMatrix
     .filter((row) => row.name.toLowerCase().includes(matrixSearch.toLowerCase()))
     .filter((row) => !matrixOnlyActive || row.periodTotal > 0);
@@ -1269,7 +1373,6 @@ export default function Insights() {
             Lecture rapide + filtres + indicateurs (Total global = Solde initial + Période).
           </div>
 
-          {/* Mobile badges */}
           <div className="flex flex-wrap gap-2 pt-2 md:hidden">
             <Badge variant="secondary">
               Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}
@@ -1280,7 +1383,6 @@ export default function Insights() {
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center gap-2 md:justify-end">
-          {/* Desktop badges */}
           <div className="hidden md:flex flex-wrap gap-2 items-center">
             <Badge variant="secondary">
               Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}
@@ -1379,7 +1481,7 @@ export default function Insights() {
         </div>
       </div>
 
-      {/* Sticky filters (sticky only on md+) */}
+      {/* Sticky filters */}
       <Card className="md:sticky md:top-2 z-10">
         <CardContent className="py-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -1464,57 +1566,57 @@ export default function Insights() {
           <CardContent className="overflow-hidden">
             <div ref={refChartTotal} className="w-full">
               <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? distributionDataForChart.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={distributionDataForChart}>
-                    <XAxis
-                      dataKey="name"
-                      interval={0}
-                      angle={isMobile ? -25 : -35}
-                      textAnchor="end"
-                      height={isMobile ? 60 : 80}
-                      fontSize={isMobile ? 10 : 12}
-                    />
-                    <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                    <Tooltip
-                      formatter={(value: any, _n: any, props: any) => {
-                        const p = props?.payload;
-                        if (!p) return [value, "Total"];
-                        return [`${value}`, `Total • S:${p.baseTotal} • P:${p.periodTotal}`];
-                      }}
-                      labelFormatter={(_label: any, payload: any) =>
-                        payload?.[0]?.payload?.fullName ?? _label
-                      }
-                    />
-                    <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+                <div style={{ minWidth: getChartMinWidth(distributionDataForChart.length, isMobile) }}>
+                  <div className="h-[260px] md:h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={distributionDataForChart}>
+                        <XAxis
+                          dataKey="name"
+                          interval={chartXAxisProps.interval}
+                          angle={chartXAxisProps.angle}
+                          textAnchor={chartXAxisProps.textAnchor}
+                          height={chartXAxisProps.height}
+                          fontSize={chartXAxisProps.fontSize}
+                          tickMargin={chartXAxisProps.tickMargin}
+                        />
+                        <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                        <Tooltip
+                          formatter={(value: any, _n: any, props: any) => {
+                            const p = props?.payload;
+                            if (!p) return [value, "Total"];
+                            return [`${value}`, `Total • S:${p.baseTotal} • P:${p.periodTotal}`];
+                          }}
+                          labelFormatter={(_label: any, payload: any) =>
+                            payload?.[0]?.payload?.fullName ?? _label
+                          }
+                        />
+                        <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${distributionData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${distributionData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
+                </Button>
+              </div>
+            )}
 
             <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-2">
-              {/* Top Most */}
               <div className="rounded-xl border bg-muted/20 p-4">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Top 3 — Le plus chargé
@@ -1546,7 +1648,6 @@ export default function Insights() {
                 </div>
               </div>
 
-              {/* Top Least */}
               <div className="rounded-xl border bg-muted/20 p-4">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Top 3 — Le moins chargé
@@ -1655,54 +1756,67 @@ export default function Insights() {
           <CardContent className="overflow-hidden">
             <div ref={refChartNormal} className="w-full">
               <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? normalChartData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={normalChartData}>
-                    <XAxis
-                      dataKey="name"
-                      interval={0}
-                      angle={isMobile ? -25 : -35}
-                      textAnchor="end"
-                      height={isMobile ? 60 : 80}
-                      fontSize={isMobile ? 10 : 12}
-                    />
-                    <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                    <Tooltip
-                      formatter={(value: any, _name: any, props: any) => {
-                        const p = props?.payload;
-                        if (!p) return [value, LABELS.normal];
-                        return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.normal];
-                      }}
-                      labelFormatter={(_label: any, payload: any) =>
-                        payload?.[0]?.payload?.fullName ?? _label
-                      }
-                    />
-                    <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+                <div style={{ minWidth: getChartMinWidth(normalChartDataForChart.length, isMobile) }}>
+                  <div className="h-[260px] md:h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={normalChartDataForChart}>
+                        <XAxis
+                          dataKey="name"
+                          interval={chartXAxisProps.interval}
+                          angle={chartXAxisProps.angle}
+                          textAnchor={chartXAxisProps.textAnchor}
+                          height={chartXAxisProps.height}
+                          fontSize={chartXAxisProps.fontSize}
+                          tickMargin={chartXAxisProps.tickMargin}
+                        />
+                        <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                        <Tooltip
+                          formatter={(value: any, _name: any, props: any) => {
+                            const p = props?.payload;
+                            if (!p) return [value, LABELS.normal];
+                            return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.normal];
+                          }}
+                          labelFormatter={(_label: any, payload: any) =>
+                            payload?.[0]?.payload?.fullName ?? _label
+                          }
+                        />
+                        <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                        <ReferenceLine
+                          y={avgNormalGlobal}
+                          stroke="#111827"
+                          strokeWidth={3}
+                          label={{
+                            value: `Moyenne: ${avgNormalGlobal.toFixed(1)}`,
+                            position: "top",
+                            fill: "#111827",
+                            fontSize: 14,
+                            fontWeight: 700,
+                          }}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {isMobile && normalChartData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${normalChartData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${normalChartData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${normalChartData.length})`}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1714,54 +1828,67 @@ export default function Insights() {
           <CardContent className="overflow-hidden">
             <div ref={refChartHoliday} className="w-full">
               <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? holidayChartData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={holidayChartData}>
-                    <XAxis
-                      dataKey="name"
-                      interval={0}
-                      angle={isMobile ? -25 : -35}
-                      textAnchor="end"
-                      height={isMobile ? 60 : 80}
-                      fontSize={isMobile ? 10 : 12}
-                    />
-                    <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                    <Tooltip
-                      formatter={(value: any, _name: any, props: any) => {
-                        const p = props?.payload;
-                        if (!p) return [value, LABELS.holiday];
-                        return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.holiday];
-                      }}
-                      labelFormatter={(_label: any, payload: any) =>
-                        payload?.[0]?.payload?.fullName ?? _label
-                      }
-                    />
-                    <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+                <div style={{ minWidth: getChartMinWidth(holidayChartDataForChart.length, isMobile) }}>
+                  <div className="h-[260px] md:h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={holidayChartDataForChart}>
+                        <XAxis
+                          dataKey="name"
+                          interval={chartXAxisProps.interval}
+                          angle={chartXAxisProps.angle}
+                          textAnchor={chartXAxisProps.textAnchor}
+                          height={chartXAxisProps.height}
+                          fontSize={chartXAxisProps.fontSize}
+                          tickMargin={chartXAxisProps.tickMargin}
+                        />
+                        <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                        <Tooltip
+                          formatter={(value: any, _name: any, props: any) => {
+                            const p = props?.payload;
+                            if (!p) return [value, LABELS.holiday];
+                            return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.holiday];
+                          }}
+                          labelFormatter={(_label: any, payload: any) =>
+                            payload?.[0]?.payload?.fullName ?? _label
+                          }
+                        />
+                        <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
+                        <ReferenceLine
+                          y={avgHolidayGlobal}
+                          stroke="#111827"
+                          strokeWidth={3}
+                          label={{
+                            value: `Moyenne: ${avgHolidayGlobal.toFixed(1)}`,
+                            position: "top",
+                            fill: "#111827",
+                            fontSize: 14,
+                            fontWeight: 700,
+                          }}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {isMobile && holidayChartData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${holidayChartData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {showAllChartsMobile
+                    ? `Affichage complet (${holidayChartData.length}).`
+                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
-    </Button>
-  </div>
-)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllChartsMobile((v) => !v)}
+                >
+                  {showAllChartsMobile ? "Top 10" : `Tout (${holidayChartData.length})`}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -1791,7 +1918,6 @@ export default function Insights() {
             </label>
           </div>
 
-          {/* Mobile: cards. Desktop: table with sticky header + sticky name column */}
           {isMobile ? (
             <MatrixMobileCards rows={matrixRowsFiltered} />
           ) : (
@@ -1872,63 +1998,138 @@ export default function Insights() {
         </CardHeader>
 
         <CardContent className="overflow-hidden">
-          <div className="flex flex-col md:flex-row md:items-center gap-3 mb-3">
-            <input
-              value={tableSearch}
-              onChange={(e) => setTableSearch(e.target.value)}
-              placeholder="Rechercher dans le tableau..."
-              className="w-full md:w-80 border rounded-md px-3 py-2 text-sm"
-            />
+          <div className="mb-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <Input
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                placeholder="Rechercher un membre..."
+                className="w-full"
+              />
 
-            <button
-              type="button"
-              className="text-sm border rounded-md px-3 py-2 hover:bg-muted w-full md:w-auto"
-              onClick={() => setTableAsc((v) => !v)}
-            >
-              Tri: {tableAsc ? "Croissant" : "Décroissant"}
-            </button>
+              <Select
+                value={tableSortBy}
+                onValueChange={(value) =>
+                  setTableSortBy(
+                    value as "name" | "totalNormal" | "totalHoliday" | "total"
+                  )
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Trier par" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Membre</SelectItem>
+                  <SelectItem value="totalNormal">Total jours normaux</SelectItem>
+                  <SelectItem value="totalHoliday">Total jours fériés</SelectItem>
+                  <SelectItem value="total">Total global</SelectItem>
+                </SelectContent>
+              </Select>
 
-            <div className="text-sm text-muted-foreground md:ml-2">
-              (Tri basé sur Total global)
+              <Select
+                value={tableSortOrder}
+                onValueChange={(value) => setTableSortOrder(value as "asc" | "desc")}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Ordre" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="asc">Croissant</SelectItem>
+                  <SelectItem value="desc">Décroissant</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button variant="outline" onClick={resetTotalsFilters}>
+                Reset filtres
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div className="rounded-lg border p-3 space-y-2">
+                <div className="text-sm font-medium">Total jours normaux</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalNormalMin}
+                    onChange={(e) => setFilterTotalNormalMin(e.target.value)}
+                    placeholder="Min"
+                  />
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalNormalMax}
+                    onChange={(e) => setFilterTotalNormalMax(e.target.value)}
+                    placeholder="Max"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-2">
+                <div className="text-sm font-medium">Total jours fériés</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalHolidayMin}
+                    onChange={(e) => setFilterTotalHolidayMin(e.target.value)}
+                    placeholder="Min"
+                  />
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalHolidayMax}
+                    onChange={(e) => setFilterTotalHolidayMax(e.target.value)}
+                    placeholder="Max"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-2">
+                <div className="text-sm font-medium">Total global</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalGlobalMin}
+                    onChange={(e) => setFilterTotalGlobalMin(e.target.value)}
+                    placeholder="Min"
+                  />
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={filterTotalGlobalMax}
+                    onChange={(e) => setFilterTotalGlobalMax(e.target.value)}
+                    placeholder="Max"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="text-sm text-muted-foreground">
+              Le tableau est filtré par nom, totaux normaux, totaux fériés et total global.
             </div>
           </div>
 
-          {/* Mobile: cards. Desktop: table with sticky header + sticky name column */}
           {isMobile ? (
             <TotalsMobileCards rows={totalsTableRows} />
           ) : (
             <div className="w-full rounded-xl border bg-background overflow-auto max-h-[70vh]">
-              <Table className="min-w-[1280px]">
+              <Table className="w-full">
                 <TableHeader className="bg-background">
                   <TableRow>
                     <TableHead className={TH_TOP_LEFT}>Membre</TableHead>
 
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Solde (Normal)", "crédit initial")}
+                    <TableHead className={cn(TH_TOP, "text-right py-1 px-2 text-xs")}>
+                      Normaux
                     </TableHead>
 
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Solde (Férié)", "crédit initial")}
+                    <TableHead className={cn(TH_TOP, "text-right py-1 px-2 text-xs")}>
+                      Fériés
                     </TableHead>
 
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Solde (Total)", "crédit initial")}
-                    </TableHead>
-
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Période (Normal)", "sur période")}
-                    </TableHead>
-
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Période (Férié)", "sur période")}
-                    </TableHead>
-
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Période (Total)", "sur période")}
-                    </TableHead>
-
-                    <TableHead className={cn(TH_TOP, "text-right")}>
-                      {headerCell("Total global", "Solde + période")}
+                    <TableHead className={cn(TH_TOP, "text-right py-1 px-2 text-xs")}>
+                      Total
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1936,19 +2137,19 @@ export default function Insights() {
                 <TableBody>
                   {totalsTableRows.map((r) => (
                     <TableRow key={r.memberId} className="hover:bg-muted/50">
-                      <TableCell className={TD_LEFT}>
+                      <TableCell className={`${TD_LEFT} py-1 px-2`}>
                         <div className="truncate font-medium">{r.name}</div>
                       </TableCell>
 
-                      <TableCell className="text-right">{r.baseNormal}</TableCell>
-                      <TableCell className="text-right">{r.baseHoliday}</TableCell>
-                      <TableCell className="text-right font-semibold">{r.baseTotal}</TableCell>
-
-                      <TableCell className="text-right">{r.periodNormal}</TableCell>
-                      <TableCell className="text-right">{r.periodHoliday}</TableCell>
-                      <TableCell className="text-right font-semibold">{r.periodTotal}</TableCell>
-
-                      <TableCell className="text-right font-bold">{r.total}</TableCell>
+                      <TableCell className="text-right font-semibold py-1 px-2">
+                        {r.totalNormal}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold py-1 px-2">
+                        {r.totalHoliday}
+                      </TableCell>
+                      <TableCell className="text-right font-bold py-1 px-2">
+                        {r.total}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1967,54 +2168,55 @@ export default function Insights() {
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastDutyData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={daysSinceLastDutyData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const hasValue = props?.payload?.hasValue;
-                      if (!hasValue) return ["Jamais", "Jours"];
-                      return [value, "Jours"];
-                    }}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div style={{ minWidth: getChartMinWidth(daysSinceLastDutyDataForChart.length, isMobile) }}>
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daysSinceLastDutyDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={chartXAxisProps.interval}
+                        angle={chartXAxisProps.angle}
+                        textAnchor={chartXAxisProps.textAnchor}
+                        height={chartXAxisProps.height}
+                        fontSize={chartXAxisProps.fontSize}
+                        tickMargin={chartXAxisProps.tickMargin}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, _name: any, props: any) => {
+                          const hasValue = props?.payload?.hasValue;
+                          if (!hasValue) return ["Jamais", "Jours"];
+                          return [value, "Jours"];
+                        }}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
           </div>
 
           {isMobile && daysSinceLastDutyData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${daysSinceLastDutyData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="text-xs text-muted-foreground">
+                {showAllChartsMobile
+                  ? `Affichage complet (${daysSinceLastDutyData.length}).`
+                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+              </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastDutyData.length})`}
-    </Button>
-  </div>
-)}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllChartsMobile((v) => !v)}
+              >
+                {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastDutyData.length})`}
+              </Button>
+            </div>
+          )}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = personne non planifiée depuis longtemps. “Jamais” est volontairement mis très haut.
@@ -2030,54 +2232,55 @@ export default function Insights() {
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastNormalDutyData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={daysSinceLastNormalDutyData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const hasValue = props?.payload?.hasValue;
-                      if (!hasValue) return ["Jamais", "Jours"];
-                      return [value, "Jours"];
-                    }}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div style={{ minWidth: getChartMinWidth(daysSinceLastNormalDutyDataForChart.length, isMobile) }}>
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daysSinceLastNormalDutyDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={chartXAxisProps.interval}
+                        angle={chartXAxisProps.angle}
+                        textAnchor={chartXAxisProps.textAnchor}
+                        height={chartXAxisProps.height}
+                        fontSize={chartXAxisProps.fontSize}
+                        tickMargin={chartXAxisProps.tickMargin}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, _name: any, props: any) => {
+                          const hasValue = props?.payload?.hasValue;
+                          if (!hasValue) return ["Jamais", "Jours"];
+                          return [value, "Jours"];
+                        }}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
           </div>
 
           {isMobile && daysSinceLastNormalDutyData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${daysSinceLastNormalDutyData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="text-xs text-muted-foreground">
+                {showAllChartsMobile
+                  ? `Affichage complet (${daysSinceLastNormalDutyData.length}).`
+                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+              </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastNormalDutyData.length})`}
-    </Button>
-  </div>
-)}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllChartsMobile((v) => !v)}
+              >
+                {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastNormalDutyData.length})`}
+              </Button>
+            </div>
+          )}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour normal depuis longtemps.
@@ -2093,54 +2296,55 @@ export default function Insights() {
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
-  <div style={{ minWidth: isMobile && showAllChartsMobile ? daysSinceLastHolidayDutyData.length * 60 : 0 }}>
-    <div className="h-[260px] md:h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={daysSinceLastHolidayDutyData}>
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={isMobile ? -25 : -35}
-                    textAnchor="end"
-                    height={isMobile ? 60 : 80}
-                    fontSize={isMobile ? 10 : 12}
-                  />
-                  <YAxis width={isMobile ? 28 : 40} fontSize={12} />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const hasValue = props?.payload?.hasValue;
-                      if (!hasValue) return ["Jamais", "Jours"];
-                      return [value, "Jours"];
-                    }}
-                    labelFormatter={(_label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullName ?? _label
-                    }
-                  />
-                  <Bar dataKey="days" fill="#F97316" radius={[6, 6, 0, 0]} />
-                </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-</div>
+              <div style={{ minWidth: getChartMinWidth(daysSinceLastHolidayDutyDataForChart.length, isMobile) }}>
+                <div className="h-[260px] md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daysSinceLastHolidayDutyDataForChart}>
+                      <XAxis
+                        dataKey="name"
+                        interval={chartXAxisProps.interval}
+                        angle={chartXAxisProps.angle}
+                        textAnchor={chartXAxisProps.textAnchor}
+                        height={chartXAxisProps.height}
+                        fontSize={chartXAxisProps.fontSize}
+                        tickMargin={chartXAxisProps.tickMargin}
+                      />
+                      <YAxis width={isMobile ? 28 : 40} fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, _name: any, props: any) => {
+                          const hasValue = props?.payload?.hasValue;
+                          if (!hasValue) return ["Jamais", "Jours"];
+                          return [value, "Jours"];
+                        }}
+                        labelFormatter={(_label: any, payload: any) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
+                      />
+                      <Bar dataKey="days" fill="#F97316" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
           </div>
 
           {isMobile && daysSinceLastHolidayDutyData.length > CHART_MOBILE_LIMIT && (
-  <div className="mt-2 flex items-center justify-between gap-2">
-    <div className="text-xs text-muted-foreground">
-      {showAllChartsMobile
-        ? `Affichage complet (${daysSinceLastHolidayDutyData.length}).`
-        : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
-    </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="text-xs text-muted-foreground">
+                {showAllChartsMobile
+                  ? `Affichage complet (${daysSinceLastHolidayDutyData.length}).`
+                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+              </div>
 
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => setShowAllChartsMobile((v) => !v)}
-    >
-      {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastHolidayDutyData.length})`}
-    </Button>
-  </div>
-)}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllChartsMobile((v) => !v)}
+              >
+                {showAllChartsMobile ? "Top 10" : `Tout (${daysSinceLastHolidayDutyData.length})`}
+              </Button>
+            </div>
+          )}
 
           <div className="text-xs text-muted-foreground mt-2">
             Grande barre = membre sans jour férié depuis longtemps.
