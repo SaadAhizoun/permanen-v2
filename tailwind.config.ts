@@ -50,6 +50,10 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        elevated: {
+          DEFAULT: "hsl(var(--elevated))",
+          foreground: "hsl(var(--elevated-foreground))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -91,6 +95,14 @@ export default {
         'lg': 'var(--shadow-lg)',
         'glow': 'var(--shadow-glow)',
       },
+      transitionTimingFunction: {
+        standard: 'var(--ease-standard)',
+      },
+      transitionDuration: {
+        micro: 'var(--duration-micro)',
+        component: 'var(--duration-component)',
+        page: 'var(--duration-page)',
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },
@@ -116,6 +128,9 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.7" },
         },
+        shimmer: {
+          "100%": { transform: "translateX(100%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -124,6 +139,7 @@ export default {
         "slide-in-left": "slide-in-left 0.3s ease-out forwards",
         "scale-in": "scale-in 0.2s ease-out forwards",
         "pulse-soft": "pulse-soft 2s ease-in-out infinite",
+        shimmer: "shimmer 1.8s ease-in-out infinite",
       },
     },
   },

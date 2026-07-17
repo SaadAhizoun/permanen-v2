@@ -2,6 +2,7 @@ import * as React from "react";
 import * as LabelPrimitive from "@radix-ui/react-label";
 import { Slot } from "@radix-ui/react-slot";
 import { Controller, ControllerProps, FieldPath, FieldValues, FormProvider, useFormContext } from "react-hook-form";
+import * as m from "motion/react-m";
 
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
@@ -118,9 +119,17 @@ const FormMessage = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<
     }
 
     return (
-      <p ref={ref} id={formMessageId} className={cn("text-sm font-medium text-destructive", className)} {...props}>
+      <m.p
+        ref={ref}
+        id={formMessageId}
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18 }}
+        className={cn("text-sm font-medium text-destructive", className)}
+        {...props}
+      >
         {body}
-      </p>
+      </m.p>
     );
   },
 );

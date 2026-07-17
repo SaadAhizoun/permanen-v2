@@ -17,7 +17,11 @@
     /* Cards and surfaces */
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    
+
+    /* Elevated surface: modals, popovers, dropdowns raised above cards */
+    --elevated: 0 0% 100%;
+    --elevated-foreground: 222 47% 11%;
+
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
@@ -83,6 +87,12 @@
     --shadow-md: 0 4px 6px -1px hsl(222 47% 11% / 0.1), 0 2px 4px -2px hsl(222 47% 11% / 0.1);
     --shadow-lg: 0 10px 15px -3px hsl(222 47% 11% / 0.1), 0 4px 6px -4px hsl(222 47% 11% / 0.1);
     --shadow-glow: 0 0 20px hsl(173 58% 39% / 0.3);
+
+    /* Motion system: one easing family, three durations */
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --duration-micro: 150ms;
+    --duration-component: 220ms;
+    --duration-page: 280ms;
   }
 
   .dark {
@@ -91,6 +101,9 @@
 
     --card: 222 47% 9%;
     --card-foreground: 210 40% 98%;
+
+    --elevated: 222 47% 12%;
+    --elevated-foreground: 210 40% 98%;
 
     --popover: 222 47% 9%;
     --popover-foreground: 210 40% 98%;
@@ -151,12 +164,24 @@
   h3 {
     @apply text-xl md:text-2xl;
   }
+
+  /* Reduced motion: strip decorative animation, keep instant state changes */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
   /* KPI Card styling */
   .kpi-card {
-    @apply relative overflow-hidden rounded-xl border bg-card p-6 shadow-sm transition-all duration-300;
+    @apply relative overflow-hidden rounded-xl border bg-card p-6 shadow-sm transition-[transform,box-shadow] duration-component ease-standard;
   }
 
   .kpi-card:hover {
@@ -193,7 +218,7 @@
 
   /* Calendar day styling */
   .calendar-day {
-    @apply relative rounded-lg border p-2 min-h-[80px] transition-all duration-200 cursor-pointer;
+    @apply relative rounded-lg border p-1.5 sm:p-2 min-h-[64px] sm:min-h-[100px] transition-colors duration-component ease-standard cursor-pointer;
   }
 
   .calendar-day:hover {
