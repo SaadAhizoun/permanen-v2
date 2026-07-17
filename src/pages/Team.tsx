@@ -5,9 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Skeleton } from '@/components/ui/skeleton';
+import { LoadingState, EmptyState, StatusBadge } from '@/components/shared';
 import {
   Table,
   TableBody,
@@ -40,6 +39,7 @@ import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { AnimatedSection, AnimatedList } from '@/components/motion';
 
 interface TeamMember {
   id: string;
@@ -270,15 +270,14 @@ export default function Team() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-96 w-full" />
+        <LoadingState variant="table" rows={6} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="space-y-6">
+      <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -350,8 +349,9 @@ export default function Team() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
+      </AnimatedSection>
 
+      <AnimatedSection delay={0.08}>
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -376,16 +376,19 @@ export default function Team() {
             <TableBody>
               {filteredMembers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                    <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                    <p>{fr.team.noMembers}</p>
+                  <TableCell colSpan={9}>
+                    <EmptyState icon={<Users />} title={fr.team.noMembers} />
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredMembers.map((member) => {
-
-                  return (
-                    <TableRow key={member.id} className="data-table-row">
+                <AnimatedList
+                  as="tr"
+                  items={filteredMembers}
+                  getKey={(member) => member.id}
+                  itemClassName="data-table-row"
+                  layout
+                  renderItem={(member) => (
+                    <>
                       <TableCell>
                         <div>
                           <span className="font-medium">{member.full_name}</span>
@@ -413,9 +416,9 @@ export default function Team() {
                       </TableCell>
 
                       <TableCell className="text-center">
-                        <Badge variant={member.active ? 'default' : 'secondary'}>
+                        <StatusBadge tone={member.active ? 'success' : 'neutral'}>
                           {member.active ? fr.team.active : fr.team.inactive}
-                        </Badge>
+                        </StatusBadge>
                       </TableCell>
 
                       <TableCell className="text-right">
@@ -456,14 +459,15 @@ export default function Team() {
                           )}
                         </div>
                       </TableCell>
-                    </TableRow>
-                  );
-                })
+                    </>
+                  )}
+                />
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+      </AnimatedSection>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Lock } from 'lucide-react';
+import { PageTransition, StaggerContainer, StaggerItem } from '@/components/motion';
 
 export default function Profile() {
   const [password, setPassword] = useState('');
@@ -43,7 +44,7 @@ export default function Profile() {
   };
 
   return (
-    <div className="max-w-xl mx-auto mt-10 animate-fade-in">
+    <PageTransition className="max-w-xl mx-auto mt-10">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -52,30 +53,38 @@ export default function Profile() {
           </CardTitle>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <Input
-            type="password"
-            placeholder="Nouveau mot de passe"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+        <StaggerContainer as="div">
+          <CardContent className="space-y-4">
+            <StaggerItem>
+              <Input
+                type="password"
+                placeholder="Nouveau mot de passe"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </StaggerItem>
 
-          <Input
-            type="password"
-            placeholder="Confirmer le mot de passe"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-          />
+            <StaggerItem>
+              <Input
+                type="password"
+                placeholder="Confirmer le mot de passe"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            </StaggerItem>
 
-          <Button
-            className="w-full"
-            onClick={handleChangePassword}
-            disabled={loading}
-          >
-            {loading ? 'Mise à jour...' : 'Mettre à jour'}
-          </Button>
-        </CardContent>
+            <StaggerItem>
+              <Button
+                className="w-full"
+                onClick={handleChangePassword}
+                disabled={loading}
+              >
+                {loading ? 'Mise à jour...' : 'Mettre à jour'}
+              </Button>
+            </StaggerItem>
+          </CardContent>
+        </StaggerContainer>
       </Card>
-    </div>
+    </PageTransition>
   );
 }

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
+import { LoadingState, EmptyState } from '@/components/shared';
 import {
   Table,
   TableBody,
@@ -43,6 +43,7 @@ import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { AnimatedSection, StaggerContainer, StaggerItem, AnimatedList } from '@/components/motion';
 
 interface Holiday {
   id: string;
@@ -156,15 +157,14 @@ export default function Holidays() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-96 w-full" />
+        <LoadingState variant="table" rows={5} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="space-y-6">
+      <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         {isAdmin && (
           <div className="flex items-center gap-2">
             <Select value={String(seedYear)} onValueChange={(v) => setSeedYear(parseInt(v))}>
@@ -250,79 +250,93 @@ export default function Holidays() {
             </DialogContent>
           </Dialog>
         )}
-      </div>
+      </AnimatedSection>
 
       {holidays.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <Umbrella className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">{fr.holidays.noHolidays}</p>
-            {isAdmin && (
-              <Button variant="link" onClick={() => setDialogOpen(true)}>
-                Ajouter un jour férié
-              </Button>
-            )}
+          <CardContent>
+            <EmptyState
+              icon={<Umbrella />}
+              title={fr.holidays.noHolidays}
+              action={
+                isAdmin ? (
+                  <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+                    Ajouter un jour férié
+                  </Button>
+                ) : undefined
+              }
+            />
           </CardContent>
         </Card>
       ) : (
-        Object.entries(groupedHolidays).map(([month, monthHolidays]) => (
-          <Card key={month}>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base capitalize">{month}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{fr.holidays.date}</TableHead>
-                    <TableHead>{fr.holidays.label}</TableHead>
-                    <TableHead>{fr.holidays.country}</TableHead>
-                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {monthHolidays.map((holiday) => (
-                    <TableRow key={holiday.id}>
-                      <TableCell>
-                        {format(new Date(holiday.date), 'EEEE d', { locale: frLocale })}
-                      </TableCell>
-                      <TableCell>{holiday.label}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{holiday.country}</Badge>
-                      </TableCell>
-                      {isAdmin && (
-                        <TableCell className="text-right">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>{fr.common.confirmDelete}</AlertDialogTitle>
-                                <AlertDialogDescription>{fr.common.deleteWarning}</AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>{fr.common.cancel}</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleDeleteHoliday(holiday.id)}
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                  {fr.common.delete}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        ))
+        <StaggerContainer className="space-y-6">
+          {Object.entries(groupedHolidays).map(([month, monthHolidays]) => (
+            <StaggerItem key={month}>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base capitalize">{month}</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{fr.holidays.date}</TableHead>
+                        <TableHead>{fr.holidays.label}</TableHead>
+                        <TableHead>{fr.holidays.country}</TableHead>
+                        {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <AnimatedList
+                        items={monthHolidays}
+                        getKey={(holiday) => holiday.id}
+                        as="tr"
+                        itemClassName="border-b transition-colors data-[state=selected]:bg-muted hover:bg-muted/50"
+                        renderItem={(holiday) => (
+                          <>
+                            <TableCell>
+                              {format(new Date(holiday.date), 'EEEE d', { locale: frLocale })}
+                            </TableCell>
+                            <TableCell>{holiday.label}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{holiday.country}</Badge>
+                            </TableCell>
+                            {isAdmin && (
+                              <TableCell className="text-right">
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>{fr.common.confirmDelete}</AlertDialogTitle>
+                                      <AlertDialogDescription>{fr.common.deleteWarning}</AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>{fr.common.cancel}</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => handleDeleteHoliday(holiday.id)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        {fr.common.delete}
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </TableCell>
+                            )}
+                          </>
+                        )}
+                      />
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+          ))}
+        </StaggerContainer>
       )}
     </div>
   );

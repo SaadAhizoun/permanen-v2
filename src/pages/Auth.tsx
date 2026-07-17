@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as m from 'motion/react-m';
+import { useReducedMotion } from 'motion/react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { fr } from '@/lib/i18n';
 import { Calendar, Users, Shield } from 'lucide-react';
+import { StaggerContainer, StaggerItem } from '@/components/motion';
+import { premiumEase } from '@/lib/motion';
 
 export default function Auth() {
   const navigate = useNavigate();
@@ -59,129 +63,186 @@ export default function Auth() {
     }
   };
 
+  const shouldReduceMotion = useReducedMotion();
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
-      <div className="w-full max-w-md space-y-8">
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
+      {/* Subtle animated background shapes — decorative only, disabled under reduced motion */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        <m.div
+          className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl"
+          animate={
+            shouldReduceMotion
+              ? undefined
+              : { x: [0, 24, 0], y: [0, 16, 0] }
+          }
+          transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <m.div
+          className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-accent/10 blur-3xl"
+          animate={
+            shouldReduceMotion
+              ? undefined
+              : { x: [0, -20, 0], y: [0, -20, 0] }
+          }
+          transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </div>
+
+      <StaggerContainer className="relative w-full max-w-md space-y-8">
         {/* Logo and Title */}
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary text-primary-foreground shadow-lg">
-            <Calendar className="w-8 h-8" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Gestion de Permanences</h1>
-            <p className="text-muted-foreground mt-2">
-              Suivi et affectation des permanences avec aide à la décision
-            </p>
-          </div>
+          <StaggerItem>
+            <m.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.32, ease: premiumEase }}
+              className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary text-primary-foreground shadow-lg"
+            >
+              <Calendar className="w-8 h-8" />
+            </m.div>
+          </StaggerItem>
+          <StaggerItem>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Gestion de Permanences</h1>
+              <p className="text-muted-foreground mt-2">
+                Suivi et affectation des permanences avec aide à la décision
+              </p>
+            </div>
+          </StaggerItem>
         </div>
 
         {/* Features */}
-        <div className="flex justify-center gap-6 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-accent" />
-            <span>Équipe</span>
+        <StaggerItem>
+          <div className="flex justify-center gap-6 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-accent" />
+              <span>Équipe</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-accent" />
+              <span>Planning</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-accent" />
+              <span>Sécurisé</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-accent" />
-            <span>Planning</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-accent" />
-            <span>Sécurisé</span>
-          </div>
-        </div>
+        </StaggerItem>
 
         {/* Auth Card */}
-        <Card className="shadow-xl border-0 bg-card/80 backdrop-blur-sm">
-          <CardHeader className="text-center pb-4">
-            <CardTitle>Bienvenue</CardTitle>
-            <CardDescription>Connectez-vous ou créez un compte</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="signin" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="signin">{fr.auth.signIn}</TabsTrigger>
-                <TabsTrigger value="signup">{fr.auth.signUp}</TabsTrigger>
-              </TabsList>
+        <StaggerItem>
+          <Card className="shadow-xl border-0 bg-card/80 backdrop-blur-sm">
+            <CardHeader className="text-center pb-4">
+              <CardTitle>Bienvenue</CardTitle>
+              <CardDescription>Connectez-vous ou créez un compte</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="signin" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 mb-6">
+                  <TabsTrigger value="signin">{fr.auth.signIn}</TabsTrigger>
+                  <TabsTrigger value="signup">{fr.auth.signUp}</TabsTrigger>
+                </TabsList>
 
-              <TabsContent value="signin">
-                <form onSubmit={handleSignIn} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="signin-email">{fr.auth.email}</Label>
-                    <Input
-                      id="signin-email"
-                      name="email"
-                      type="email"
-                      placeholder="vous@exemple.com"
-                      required
-                      autoComplete="email"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signin-password">{fr.auth.password}</Label>
-                    <Input
-                      id="signin-password"
-                      name="password"
-                      type="password"
-                      placeholder="••••••••"
-                      required
-                      autoComplete="current-password"
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading ? fr.auth.signingIn : fr.auth.signIn}
-                  </Button>
-                </form>
-              </TabsContent>
+                <TabsContent value="signin">
+                  <StaggerContainer as="div" className="space-y-4">
+                    <form onSubmit={handleSignIn} className="space-y-4">
+                      <StaggerItem>
+                        <div className="space-y-2">
+                          <Label htmlFor="signin-email">{fr.auth.email}</Label>
+                          <Input
+                            id="signin-email"
+                            name="email"
+                            type="email"
+                            placeholder="vous@exemple.com"
+                            required
+                            autoComplete="email"
+                          />
+                        </div>
+                      </StaggerItem>
+                      <StaggerItem>
+                        <div className="space-y-2">
+                          <Label htmlFor="signin-password">{fr.auth.password}</Label>
+                          <Input
+                            id="signin-password"
+                            name="password"
+                            type="password"
+                            placeholder="••••••••"
+                            required
+                            autoComplete="current-password"
+                          />
+                        </div>
+                      </StaggerItem>
+                      <StaggerItem>
+                        <Button type="submit" className="w-full" disabled={loading}>
+                          {loading ? fr.auth.signingIn : fr.auth.signIn}
+                        </Button>
+                      </StaggerItem>
+                    </form>
+                  </StaggerContainer>
+                </TabsContent>
 
-              <TabsContent value="signup">
-                <form onSubmit={handleSignUp} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-fullname">{fr.auth.fullName}</Label>
-                    <Input
-                      id="signup-fullname"
-                      name="fullName"
-                      type="text"
-                      placeholder="Jean Dupont"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-email">{fr.auth.email}</Label>
-                    <Input
-                      id="signup-email"
-                      name="email"
-                      type="email"
-                      placeholder="vous@exemple.com"
-                      required
-                      autoComplete="email"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-password">{fr.auth.password}</Label>
-                    <Input
-                      id="signup-password"
-                      name="password"
-                      type="password"
-                      placeholder="••••••••"
-                      required
-                      autoComplete="new-password"
-                      minLength={6}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading ? fr.auth.signingUp : fr.auth.createAccount}
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
+                <TabsContent value="signup">
+                  <StaggerContainer as="div" className="space-y-4">
+                    <form onSubmit={handleSignUp} className="space-y-4">
+                      <StaggerItem>
+                        <div className="space-y-2">
+                          <Label htmlFor="signup-fullname">{fr.auth.fullName}</Label>
+                          <Input
+                            id="signup-fullname"
+                            name="fullName"
+                            type="text"
+                            placeholder="Jean Dupont"
+                            required
+                          />
+                        </div>
+                      </StaggerItem>
+                      <StaggerItem>
+                        <div className="space-y-2">
+                          <Label htmlFor="signup-email">{fr.auth.email}</Label>
+                          <Input
+                            id="signup-email"
+                            name="email"
+                            type="email"
+                            placeholder="vous@exemple.com"
+                            required
+                            autoComplete="email"
+                          />
+                        </div>
+                      </StaggerItem>
+                      <StaggerItem>
+                        <div className="space-y-2">
+                          <Label htmlFor="signup-password">{fr.auth.password}</Label>
+                          <Input
+                            id="signup-password"
+                            name="password"
+                            type="password"
+                            placeholder="••••••••"
+                            required
+                            autoComplete="new-password"
+                            minLength={6}
+                          />
+                        </div>
+                      </StaggerItem>
+                      <StaggerItem>
+                        <Button type="submit" className="w-full" disabled={loading}>
+                          {loading ? fr.auth.signingUp : fr.auth.createAccount}
+                        </Button>
+                      </StaggerItem>
+                    </form>
+                  </StaggerContainer>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </StaggerItem>
 
-        <p className="text-center text-sm text-muted-foreground">
-          V2+ — Gestion intelligente des permanences
-        </p>
-      </div>
+        <StaggerItem>
+          <p className="text-center text-sm text-muted-foreground">
+            V2+ — Gestion intelligente des permanences
+          </p>
+        </StaggerItem>
+      </StaggerContainer>
     </div>
   );
 }

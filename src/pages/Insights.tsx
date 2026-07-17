@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+
+import { AnimatePresence, useReducedMotion } from "motion/react";
+import * as m from "motion/react-m";
+import { premiumEase } from "@/lib/motion";
+import {
+  StaggerContainer,
+  StaggerItem,
+  AnimatedSection,
+  AnimatedNumber,
+  AnimatedList,
+  AnimatedPresencePanel,
+} from "@/components/motion";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadingState, StatusBadge } from "@/components/shared";
 
 import {
   Select,
@@ -43,15 +55,18 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  LabelList,
 } from "recharts";
 
-import { format, differenceInCalendarDays } from "date-fns";
+import {
+  differenceInCalendarDays,
+  endOfMonth,
+  format,
+  startOfMonth,
+  startOfYear,
+  subMonths,
+} from "date-fns";
 import { fr as frLocale } from "date-fns/locale";
-
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import html2canvas from "html2canvas";
 
 // -------------------- Types --------------------
 type Member = {
@@ -66,6 +81,14 @@ type Duty = {
   duty_type?: string | null;
   team_member_id: string | null;
   team_member?: { id: string; full_name: string } | null;
+};
+
+type AnalysisMode = "period" | "global";
+
+type RecencyValues = {
+  total: number | null;
+  normal: number | null;
+  holiday: number | null;
 };
 
 // -------------------- Constants --------------------
@@ -120,6 +143,62 @@ function clampDateStr(d: string) {
   return (d || "").trim().slice(0, 10);
 }
 
+function formatDateForDisplay(dateStr: string) {
+  const [year, month, day] = clampDateStr(dateStr).split("-");
+  return year && month && day ? `${day}/${month}/${year}` : "…";
+}
+
+function toDateInputValue(date: Date) {
+  return format(date, "yyyy-MM-dd");
+}
+
+function compareNames(nameA: string, nameB: string) {
+  return nameA.localeCompare(nameB, "fr", { sensitivity: "base" });
+}
+
+function comparePlanningPriority(
+  countA: number,
+  countB: number,
+  daysA: number | null,
+  daysB: number | null,
+  nameA: string,
+  nameB: string
+) {
+  if (countA !== countB) return countA - countB;
+  if (daysA === null && daysB !== null) return -1;
+  if (daysA !== null && daysB === null) return 1;
+  if (daysA !== null && daysB !== null && daysA !== daysB) return daysB - daysA;
+  return compareNames(nameA, nameB);
+}
+
+function compareRecencyPriority(
+  daysA: number | null,
+  daysB: number | null,
+  nameA: string,
+  nameB: string
+) {
+  if (daysA === null && daysB !== null) return -1;
+  if (daysA !== null && daysB === null) return 1;
+  if (daysA !== null && daysB !== null && daysA !== daysB) return daysB - daysA;
+  return compareNames(nameA, nameB);
+}
+
+function addRecencyDisplayValues<
+  T extends { days: number | null; fullName: string }
+>(items: T[]) {
+  const maximumRealDays = Math.max(0, ...items.flatMap((item) => item.days ?? []));
+  const displayPadding = Math.max(7, Math.ceil(maximumRealDays * 0.1));
+
+  return [...items]
+    .sort((a, b) => compareRecencyPriority(a.days, b.days, a.fullName, b.fullName))
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      displayDays: item.days ?? maximumRealDays + displayPadding,
+      displayLabel: item.days === null ? "Jamais" : String(item.days),
+    }));
+}
+
 function headerCell(title: string, subtitle?: string) {
   return (
     <div className="flex flex-col items-end">
@@ -161,6 +240,19 @@ function getChartMinWidth(itemCount: number, isMobile: boolean) {
   return Math.max(isMobile ? 620 : 900, itemCount * (isMobile ? 58 : 42));
 }
 
+/**
+ * Presentation-only helper: derives a stable identity string from a chart's
+ * already-computed dataset (member id + displayed value), used purely as a
+ * React `key` to fade-remount a chart when its data actually changes —
+ * never influences sorting/filtering/aggregation.
+ */
+function chartDatasetKey<T extends { memberId: string }>(
+  items: T[],
+  pick: (item: T) => number | string
+) {
+  return items.map((item) => `${item.memberId}:${pick(item)}`).join("|");
+}
+
 // -------------------- Small Components --------------------
 function KpiCard({
   label,
@@ -168,7 +260,7 @@ function KpiCard({
   hint,
 }: {
   label: string;
-  value: string | number;
+  value: ReactNode;
   hint?: string;
 }) {
   return (
@@ -193,36 +285,47 @@ function TotalsMobileCards({
     totalNormal: number;
     totalHoliday: number;
     total: number;
+    rank: number;
   }>;
 }) {
   return (
     <div className="space-y-3">
-      {rows.map((r) => (
-        <Card key={r.memberId}>
-          <CardContent className="py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-semibold truncate">{r.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  Normaux: {r.totalNormal} • Fériés: {r.totalHoliday}
+      <AnimatedList
+        as="div"
+        items={rows}
+        getKey={(r) => r.memberId}
+        layout
+        renderItem={(r) => (
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">
+                    Priorité n°{r.rank} — {r.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Normaux: {r.totalNormal} • Fériés: {r.totalHoliday}
+                  </div>
+                </div>
+                <div className="text-2xl font-bold tabular-nums">
+                  <AnimatedNumber value={r.total} />
                 </div>
               </div>
-              <div className="text-2xl font-bold tabular-nums">{r.total}</div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Total jours normaux</div>
-                <div className="font-semibold tabular-nums">{r.totalNormal}</div>
+              <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                <div className="rounded-md border p-2">
+                  <div className="text-xs text-muted-foreground">Total jours normaux</div>
+                  <div className="font-semibold tabular-nums">{r.totalNormal}</div>
+                </div>
+                <div className="rounded-md border p-2">
+                  <div className="text-xs text-muted-foreground">Total jours fériés</div>
+                  <div className="font-semibold tabular-nums">{r.totalHoliday}</div>
+                </div>
               </div>
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Total jours fériés</div>
-                <div className="font-semibold tabular-nums">{r.totalHoliday}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardContent>
+          </Card>
+        )}
+      />
     </div>
   );
 }
@@ -243,45 +346,53 @@ function MatrixMobileCards({
 }) {
   return (
     <div className="space-y-3">
-      {rows.map((row) => (
-        <Card key={row.memberId}>
-          <CardContent className="py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-semibold truncate">{row.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  Solde: {row.baseTotal} • Période: {row.periodTotal}
+      <AnimatedList
+        as="div"
+        items={rows}
+        getKey={(row) => row.memberId}
+        layout
+        renderItem={(row) => (
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">{row.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Solde: {row.baseTotal} • Période: {row.periodTotal}
+                  </div>
+                </div>
+                <div className="text-xl font-bold tabular-nums">
+                  <AnimatedNumber value={row.totalGlobal} />
                 </div>
               </div>
-              <div className="text-xl font-bold tabular-nums">{row.totalGlobal}</div>
-            </div>
 
-            <div className="grid grid-cols-7 gap-1 mt-3 text-center text-[11px]">
-              {row.weekdayCountsPeriod.map((v, i) => (
-                <div key={i} className="rounded-md border py-1">
-                  <div className="text-[10px] text-muted-foreground">{weekdayLabels[i]}</div>
-                  <div className="font-semibold tabular-nums">{v === 0 ? "—" : v}</div>
+              <div className="grid grid-cols-7 gap-1 mt-3 text-center text-[11px]">
+                {row.weekdayCountsPeriod.map((v, i) => (
+                  <div key={i} className="rounded-md border py-1">
+                    <div className="text-[10px] text-muted-foreground">{weekdayLabels[i]}</div>
+                    <div className="font-semibold tabular-nums">{v === 0 ? "—" : v}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
+                <div className="rounded-md border p-2">
+                  <div className="text-xs text-muted-foreground">Solde normal</div>
+                  <div className="font-semibold tabular-nums">{row.baseNormal}</div>
                 </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Solde normal</div>
-                <div className="font-semibold tabular-nums">{row.baseNormal}</div>
+                <div className="rounded-md border p-2">
+                  <div className="text-xs text-muted-foreground">Solde férié</div>
+                  <div className="font-semibold tabular-nums">{row.baseHoliday}</div>
+                </div>
+                <div className="rounded-md border p-2">
+                  <div className="text-xs text-muted-foreground">Total période</div>
+                  <div className="font-semibold tabular-nums">{row.periodTotal}</div>
+                </div>
               </div>
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Solde férié</div>
-                <div className="font-semibold tabular-nums">{row.baseHoliday}</div>
-              </div>
-              <div className="rounded-md border p-2">
-                <div className="text-xs text-muted-foreground">Total période</div>
-                <div className="font-semibold tabular-nums">{row.periodTotal}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardContent>
+          </Card>
+        )}
+      />
     </div>
   );
 }
@@ -325,6 +436,10 @@ async function fetchAllDutiesPaged() {
 export default function Insights() {
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
+  const shouldReduceMotion = useReducedMotion();
+  const chartFadeTransition = shouldReduceMotion
+    ? { duration: 0.01 }
+    : { duration: 0.24, ease: premiumEase };
   const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
 
   const chartXAxisProps = getChartXAxisProps(isMobile);
@@ -340,12 +455,13 @@ export default function Insights() {
   const [tableSearch, setTableSearch] = useState("");
   const [matrixSearch, setMatrixSearch] = useState("");
   const [matrixOnlyActive, setMatrixOnlyActive] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("period");
 
   const [tableSortBy, setTableSortBy] = useState<
     "name" | "totalNormal" | "totalHoliday" | "total"
   >("total");
 
-  const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("desc");
+  const [tableSortOrder, setTableSortOrder] = useState<"asc" | "desc">("asc");
 
   const [filterTotalNormalMin, setFilterTotalNormalMin] = useState("");
   const [filterTotalNormalMax, setFilterTotalNormalMax] = useState("");
@@ -440,6 +556,46 @@ export default function Insights() {
   const selectedCountLabel =
     selectedMemberIds.length === 0 ? members.length : selectedMemberIds.length;
 
+  const oldestAvailableDutyDate = useMemo(() => {
+    const dates = duties.map((d) => clampDateStr(d.duty_date)).filter(Boolean);
+    return dates.length
+      ? dates.reduce((oldest, date) => (date < oldest ? date : oldest))
+      : toDateInputValue(new Date());
+  }, [duties]);
+
+  const normalizedExportFrom = clampDateStr(exportFrom);
+  const normalizedExportTo = clampDateStr(exportTo);
+  const isDateRangeValid =
+    Boolean(exportFrom && exportTo) && exportFrom <= exportTo;
+  const dateRangeError =
+    !exportFrom || !exportTo
+      ? "Veuillez renseigner une date de début et une date de fin."
+      : exportFrom > exportTo
+        ? "La date de début ne peut pas être postérieure à la date de fin."
+        : null;
+
+  const setPeriod = (from: Date | string, to: Date | string) => {
+    setExportFrom(typeof from === "string" ? from : toDateInputValue(from));
+    setExportTo(typeof to === "string" ? to : toDateInputValue(to));
+  };
+
+  const applyCurrentMonth = () => {
+    const today = new Date();
+    setPeriod(startOfMonth(today), today);
+  };
+
+  const applyPreviousMonth = () => {
+    const previousMonth = subMonths(new Date(), 1);
+    setPeriod(startOfMonth(previousMonth), endOfMonth(previousMonth));
+  };
+
+  const applyCurrentYear = () => {
+    const today = new Date();
+    setPeriod(startOfYear(today), today);
+  };
+
+  const applyAllData = () => setPeriod(oldestAvailableDutyDate, new Date());
+
   const filteredDuties = useMemo(() => {
     const allowAll = selectedMemberIds.length === 0;
     const set = new Set(selectedMemberIds);
@@ -452,15 +608,13 @@ export default function Insights() {
   }, [duties, selectedMemberIds]);
 
   const exportDuties = useMemo(() => {
-    const from = clampDateStr(exportFrom);
-    const to = clampDateStr(exportTo);
-    if (!from || !to) return filteredDuties;
+    if (!isDateRangeValid) return [];
 
     return filteredDuties.filter((d) => {
       const ds = clampDateStr(d.duty_date);
-      return ds >= from && ds <= to;
+      return ds >= normalizedExportFrom && ds <= normalizedExportTo;
     });
-  }, [filteredDuties, exportFrom, exportTo]);
+  }, [filteredDuties, isDateRangeValid, normalizedExportFrom, normalizedExportTo]);
 
   const COUNT_WEEKEND_AS_HOLIDAY = true;
 
@@ -566,44 +720,134 @@ export default function Insights() {
     };
   }, [perMemberStats]);
 
+  const analysisModeLabel =
+    analysisMode === "period" ? "Période sélectionnée" : "Cumul global";
+
+  const recencyByMember = useMemo(() => {
+    const referenceDate = isDateRangeValid
+      ? parseDateOnlyUTC(normalizedExportTo)
+      : parseDateOnlyUTC(toDateInputValue(new Date()));
+    const lastDates = new Map<
+      string,
+      { total: Date | null; normal: Date | null; holiday: Date | null }
+    >();
+
+    for (const member of members) {
+      lastDates.set(member.id, { total: null, normal: null, holiday: null });
+    }
+
+    for (const duty of filteredDuties) {
+      const memberId = duty.team_member_id;
+      const dayKey = clampDateStr(duty.duty_date);
+      if (!memberId || !dayKey || dayKey > normalizedExportTo) continue;
+
+      const current = lastDates.get(memberId);
+      if (!current) continue;
+
+      const dutyDate = parseDateOnlyUTC(dayKey);
+      const isWeekend = isWeekendByDayIndex(dutyDate.getUTCDay());
+      const isHoliday = holidayDatesSet.has(dayKey) || isWeekend;
+
+      if (!current.total || dutyDate > current.total) current.total = dutyDate;
+      if (isHoliday) {
+        if (!current.holiday || dutyDate > current.holiday) current.holiday = dutyDate;
+      } else if (!current.normal || dutyDate > current.normal) {
+        current.normal = dutyDate;
+      }
+    }
+
+    return new Map<string, RecencyValues>(
+      Array.from(lastDates, ([memberId, dates]) => [
+        memberId,
+        {
+          total: dates.total
+            ? Math.max(0, differenceInCalendarDays(referenceDate, dates.total))
+            : null,
+          normal: dates.normal
+            ? Math.max(0, differenceInCalendarDays(referenceDate, dates.normal))
+            : null,
+          holiday: dates.holiday
+            ? Math.max(0, differenceInCalendarDays(referenceDate, dates.holiday))
+            : null,
+        },
+      ])
+    );
+  }, [filteredDuties, holidayDatesSet, isDateRangeValid, members, normalizedExportTo]);
+
   const distributionData = useMemo(() => {
-    return [...perMemberStats]
-      .map((m) => ({
-        memberId: m.memberId,
-        name: shortName(m.name),
-        fullName: m.name,
-        total: m.total,
-        baseTotal: m.baseTotal,
-        periodTotal: m.periodTotal,
+    return perMemberStats
+      .map((member) => ({
+        memberId: member.memberId,
+        name: shortName(member.name),
+        fullName: member.name,
+        metric: analysisMode === "period" ? member.periodTotal : member.total,
+        baseTotal: member.baseTotal,
+        periodTotal: member.periodTotal,
+        total: member.total,
+        daysSinceLast: recencyByMember.get(member.memberId)?.total ?? null,
       }))
-      .sort((a, b) => b.total - a.total);
-  }, [perMemberStats]);
+      .sort((a, b) =>
+        comparePlanningPriority(
+          a.metric,
+          b.metric,
+          a.daysSinceLast,
+          b.daysSinceLast,
+          a.fullName,
+          b.fullName
+        )
+      )
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }, [analysisMode, perMemberStats, recencyByMember]);
 
   const normalChartData = useMemo(() => {
-    return [...perMemberStats]
-      .map((m) => ({
-        memberId: m.memberId,
-        name: shortName(m.name),
-        fullName: m.name,
-        count: m.normal,
-        base: m.baseNormal,
-        period: m.periodNormal,
+    return perMemberStats
+      .map((member) => ({
+        memberId: member.memberId,
+        name: shortName(member.name),
+        fullName: member.name,
+        count: analysisMode === "period" ? member.periodNormal : member.normal,
+        base: member.baseNormal,
+        period: member.periodNormal,
+        global: member.normal,
+        daysSinceLast: recencyByMember.get(member.memberId)?.normal ?? null,
       }))
-      .sort((a, b) => b.count - a.count);
-  }, [perMemberStats]);
+      .sort((a, b) =>
+        comparePlanningPriority(
+          a.count,
+          b.count,
+          a.daysSinceLast,
+          b.daysSinceLast,
+          a.fullName,
+          b.fullName
+        )
+      )
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }, [analysisMode, perMemberStats, recencyByMember]);
 
   const holidayChartData = useMemo(() => {
-    return [...perMemberStats]
-      .map((m) => ({
-        memberId: m.memberId,
-        name: shortName(m.name),
-        fullName: m.name,
-        count: m.holiday,
-        base: m.baseHoliday,
-        period: m.periodHoliday,
+    return perMemberStats
+      .map((member) => ({
+        memberId: member.memberId,
+        name: shortName(member.name),
+        fullName: member.name,
+        count: analysisMode === "period" ? member.periodHoliday : member.holiday,
+        base: member.baseHoliday,
+        period: member.periodHoliday,
+        global: member.holiday,
+        daysSinceLast: recencyByMember.get(member.memberId)?.holiday ?? null,
       }))
-      .sort((a, b) => b.count - a.count);
-  }, [perMemberStats]);
+      .sort((a, b) =>
+        comparePlanningPriority(
+          a.count,
+          b.count,
+          a.daysSinceLast,
+          b.daysSinceLast,
+          a.fullName,
+          b.fullName
+        )
+      )
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+  }, [analysisMode, perMemberStats, recencyByMember]);
 
   const avgNormalGlobal = useMemo(() => {
     if (!normalChartData.length) return 0;
@@ -616,30 +860,50 @@ export default function Insights() {
   }, [holidayChartData]);
 
   const top3Most = useMemo(
-    () => [...perMemberStats].sort((a, b) => b.total - a.total).slice(0, 3),
-    [perMemberStats]
+    () =>
+      [...distributionData]
+        .sort(
+          (a, b) =>
+            b.metric - a.metric ||
+            comparePlanningPriority(
+              a.metric,
+              b.metric,
+              a.daysSinceLast,
+              b.daysSinceLast,
+              a.fullName,
+              b.fullName
+            )
+        )
+        .slice(0, 3),
+    [distributionData]
   );
 
-  const top3Least = useMemo(
-    () => [...perMemberStats].sort((a, b) => a.total - b.total).slice(0, 3),
-    [perMemberStats]
-  );
+  const top3Least = useMemo(() => distributionData.slice(0, 3), [distributionData]);
 
   const fairness = useMemo(() => {
-    const counts = perMemberStats.map((m) => m.total);
+    const counts = distributionData.map((item) => item.metric);
     if (counts.length === 0) return { max: 0, min: 0, avg: 0 };
     const max = Math.max(...counts);
     const min = Math.min(...counts);
     const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
     return { max, min, avg: Math.round(avg * 10) / 10 };
-  }, [perMemberStats]);
+  }, [distributionData]);
 
   const fairnessGap = fairness.max - fairness.min;
+  const activeMetricTotal = distributionData.reduce((sum, item) => sum + item.metric, 0);
+  const averageTotal = distributionData.length
+    ? activeMetricTotal / distributionData.length
+    : 0;
+  const formattedAverageTotal = averageTotal.toLocaleString("fr-FR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  const averageTotalUnit = averageTotal === 1 ? "jour" : "jours";
 
   const fairnessVerdict = useMemo(() => {
-    if (fairnessGap <= 2) return { label: "Équitable", cls: "bg-green-600 text-white" };
-    if (fairnessGap <= 5) return { label: "Moyen", cls: "bg-yellow-500 text-white" };
-    return { label: "Déséquilibré", cls: "bg-red-600 text-white" };
+    if (fairnessGap <= 2) return { label: "Équitable", cls: "bg-success text-success-foreground" };
+    if (fairnessGap <= 5) return { label: "Moyen", cls: "bg-warning text-warning-foreground" };
+    return { label: "Déséquilibré", cls: "bg-destructive text-destructive-foreground" };
   }, [fairnessGap]);
 
   /** ✅ Matrix for PERIOD by weekday + adds Solde columns + Total global */
@@ -712,129 +976,77 @@ export default function Insights() {
       row.periodTotal = row.weekdayCountsPeriod.reduce((s, x) => s + x, 0);
     }
 
-    matrix.sort((a, b) => b.totalGlobal - a.totalGlobal);
-    return matrix;
-  }, [exportDuties, members, selectedMemberIds, perMemberStats]);
+    matrix.sort((a, b) =>
+      comparePlanningPriority(
+        analysisMode === "period" ? a.periodTotal : a.totalGlobal,
+        analysisMode === "period" ? b.periodTotal : b.totalGlobal,
+        recencyByMember.get(a.memberId)?.total ?? null,
+        recencyByMember.get(b.memberId)?.total ?? null,
+        a.name,
+        b.name
+      )
+    );
+    return matrix.map((row, index) => ({ ...row, rank: index + 1 }));
+  }, [analysisMode, exportDuties, members, selectedMemberIds, perMemberStats, recencyByMember]);
 
   // ---------- Days since last (3 graphs) ----------
   const daysSinceLastDutyData = useMemo(() => {
-    const now = new Date();
-    const lastDateByMember = new Map<string, Date>();
-
-    for (const d of exportDuties) {
-      const mid = d.team_member_id;
-      if (!mid) continue;
-
-      const dayKey = clampDateStr(d.duty_date);
-      if (!dayKey) continue;
-
-      const dt = parseDateOnlyUTC(dayKey);
-      const prev = lastDateByMember.get(mid);
-      if (!prev || dt > prev) lastDateByMember.set(mid, dt);
-    }
-
     const allowAll = selectedMemberIds.length === 0;
     const selectedSet = new Set(selectedMemberIds);
 
-    return members
-      .filter((m) => allowAll || selectedSet.has(m.id))
-      .map((m) => {
-        const last = lastDateByMember.get(m.id) || null;
-        const days = last ? Math.max(0, differenceInCalendarDays(now, last)) : null;
-        return {
-          memberId: m.id,
-          name: shortName(m.full_name),
-          fullName: m.full_name,
-          days: days ?? 9999,
-          hasValue: days !== null,
-        };
-      })
-      .sort((a, b) => b.days - a.days);
-  }, [exportDuties, members, selectedMemberIds]);
-
-  const daysSinceLastDutyByMember = useMemo(() => {
-    return new Map(
-      daysSinceLastDutyData.map((item) => [item.memberId, item.hasValue ? item.days : -1])
+    return addRecencyDisplayValues(
+      members
+        .filter((member) => allowAll || selectedSet.has(member.id))
+        .map((member) => {
+          const days = recencyByMember.get(member.id)?.total ?? null;
+          return {
+            memberId: member.id,
+            name: shortName(member.full_name),
+            fullName: member.full_name,
+            days,
+            hasValue: days !== null,
+          };
+        })
     );
-  }, [daysSinceLastDutyData]);
+  }, [members, recencyByMember, selectedMemberIds]);
 
   const daysSinceLastNormalDutyData = useMemo(() => {
-    const now = new Date();
-    const lastDateByMember = new Map<string, Date>();
-
-    exportDuties.forEach((d) => {
-      const mid = d.team_member_id;
-      if (!mid) return;
-
-      const dayKey = clampDateStr(d.duty_date);
-      const dt = parseDateOnlyUTC(dayKey);
-
-      const isWeekend = isWeekendByDayIndex(dt.getUTCDay());
-      const isOfficialHoliday = holidayDatesSet.has(dayKey);
-      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY
-        ? isOfficialHoliday || isWeekend
-        : isOfficialHoliday;
-
-      if (isHoliday) return;
-
-      const prev = lastDateByMember.get(mid);
-      if (!prev || dt > prev) lastDateByMember.set(mid, dt);
-    });
-
-    return members
-      .filter((m) => selectedMemberIds.length === 0 || selectedMemberIds.includes(m.id))
-      .map((m) => {
-        const last = lastDateByMember.get(m.id) || null;
-        const days = last ? Math.max(0, differenceInCalendarDays(now, last)) : null;
-        return {
-          memberId: m.id,
-          name: shortName(m.full_name),
-          fullName: m.full_name,
-          days: days ?? 9999,
-          hasValue: days !== null,
-        };
-      })
-      .sort((a, b) => b.days - a.days);
-  }, [exportDuties, members, holidayDatesSet, selectedMemberIds]);
+    return addRecencyDisplayValues(
+      members
+        .filter(
+          (member) => selectedMemberIds.length === 0 || selectedMemberIds.includes(member.id)
+        )
+        .map((member) => {
+          const days = recencyByMember.get(member.id)?.normal ?? null;
+          return {
+            memberId: member.id,
+            name: shortName(member.full_name),
+            fullName: member.full_name,
+            days,
+            hasValue: days !== null,
+          };
+        })
+    );
+  }, [members, recencyByMember, selectedMemberIds]);
 
   const daysSinceLastHolidayDutyData = useMemo(() => {
-    const now = new Date();
-    const lastDateByMember = new Map<string, Date>();
-
-    exportDuties.forEach((d) => {
-      const mid = d.team_member_id;
-      if (!mid) return;
-
-      const dayKey = clampDateStr(d.duty_date);
-      const dt = parseDateOnlyUTC(dayKey);
-
-      const isWeekend = isWeekendByDayIndex(dt.getUTCDay());
-      const isOfficialHoliday = holidayDatesSet.has(dayKey);
-      const isHoliday = COUNT_WEEKEND_AS_HOLIDAY
-        ? isOfficialHoliday || isWeekend
-        : isOfficialHoliday;
-
-      if (!isHoliday) return;
-
-      const prev = lastDateByMember.get(mid);
-      if (!prev || dt > prev) lastDateByMember.set(mid, dt);
-    });
-
-    return members
-      .filter((m) => selectedMemberIds.length === 0 || selectedMemberIds.includes(m.id))
-      .map((m) => {
-        const last = lastDateByMember.get(m.id) || null;
-        const days = last ? Math.max(0, differenceInCalendarDays(now, last)) : null;
-        return {
-          memberId: m.id,
-          name: shortName(m.full_name),
-          fullName: m.full_name,
-          days: days ?? 200,
-          hasValue: days !== null,
-        };
-      })
-      .sort((a, b) => b.days - a.days);
-  }, [exportDuties, members, holidayDatesSet, selectedMemberIds]);
+    return addRecencyDisplayValues(
+      members
+        .filter(
+          (member) => selectedMemberIds.length === 0 || selectedMemberIds.includes(member.id)
+        )
+        .map((member) => {
+          const days = recencyByMember.get(member.id)?.holiday ?? null;
+          return {
+            memberId: member.id,
+            name: shortName(member.full_name),
+            fullName: member.full_name,
+            days,
+            hasValue: days !== null,
+          };
+        })
+    );
+  }, [members, recencyByMember, selectedMemberIds]);
 
   const totalsTableRows = useMemo(() => {
     const search = tableSearch.trim().toLowerCase();
@@ -858,9 +1070,9 @@ export default function Insights() {
       .map((r) => ({
         memberId: r.memberId,
         name: r.name,
-        totalNormal: r.baseNormal + r.periodNormal,
-        totalHoliday: r.baseHoliday + r.periodHoliday,
-        total: r.total,
+        totalNormal: analysisMode === "period" ? r.periodNormal : r.normal,
+        totalHoliday: analysisMode === "period" ? r.periodHoliday : r.holiday,
+        total: analysisMode === "period" ? r.periodTotal : r.total,
       }))
       .filter((r) => r.name.toLowerCase().includes(search))
       .filter((r) => (totalNormalMin === null ? true : r.totalNormal >= totalNormalMin))
@@ -874,7 +1086,7 @@ export default function Insights() {
       const direction = tableSortOrder === "asc" ? 1 : -1;
 
       if (tableSortBy === "name") {
-        return a.name.localeCompare(b.name) * direction;
+        return compareNames(a.name, b.name) * direction;
       }
 
       const av = Number(a[tableSortBy]) || 0;
@@ -883,14 +1095,21 @@ export default function Insights() {
       const primarySort = (av - bv) * direction;
       if (primarySort !== 0) return primarySort;
 
-      const aLastDuty = daysSinceLastDutyByMember.get(a.memberId) ?? -1;
-      const bLastDuty = daysSinceLastDutyByMember.get(b.memberId) ?? -1;
+      const recencyKey =
+        tableSortBy === "totalNormal"
+          ? "normal"
+          : tableSortBy === "totalHoliday"
+            ? "holiday"
+            : "total";
+      const aDays = recencyByMember.get(a.memberId)?.[recencyKey] ?? null;
+      const bDays = recencyByMember.get(b.memberId)?.[recencyKey] ?? null;
 
-      return bLastDuty - aLastDuty;
+      return comparePlanningPriority(av, bv, aDays, bDays, a.name, b.name);
     });
 
-    return rows;
+    return rows.map((row, index) => ({ ...row, rank: index + 1 }));
   }, [
+    analysisMode,
     perMemberStats,
     tableSearch,
     tableSortBy,
@@ -901,13 +1120,13 @@ export default function Insights() {
     filterTotalHolidayMax,
     filterTotalGlobalMin,
     filterTotalGlobalMax,
-    daysSinceLastDutyByMember,
+    recencyByMember,
   ]);
 
   const resetTotalsFilters = () => {
     setTableSearch("");
     setTableSortBy("total");
-    setTableSortOrder("desc");
+    setTableSortOrder("asc");
     setFilterTotalNormalMin("");
     setFilterTotalNormalMax("");
     setFilterTotalHolidayMin("");
@@ -917,12 +1136,11 @@ export default function Insights() {
   };
 
   const recommendations = useMemo(() => {
-    if (perMemberStats.length === 0) return [];
+    if (distributionData.length === 0) return [];
 
     const avg = fairness.avg || 0;
-    const sorted = [...perMemberStats].sort((a, b) => a.total - b.total);
-    const least = sorted.slice(0, 3);
-    const most = [...sorted].reverse().slice(0, 3);
+    const least = distributionData.slice(0, 3);
+    const most = top3Most;
 
     const recs: string[] = [];
 
@@ -937,24 +1155,41 @@ export default function Insights() {
 
     recs.push(
       `Rotation suggérée (moins chargés) : ${least
-        .map((m) => shortName(m.name))
+        .map((m) => m.name)
         .join(", ")}.`
     );
 
-    if (most[0]?.total >= avg + 3)
+    if (most[0]?.metric >= avg + 3)
       recs.push(
         `Réduire la charge de : ${most
-          .map((m) => shortName(m.name))
+          .map((m) => m.name)
           .join(", ")} (au-dessus de la moyenne).`
       );
 
-    recs.push(`${LABELS.total} = ${LABELS.solde} + ${LABELS.period}.`);
+    recs.push(`Mode d’analyse actif : ${analysisModeLabel}.`);
     recs.push(
       `Totaux: Solde = ${kpis.baseTotal} • Période = ${kpis.periodTotal} • Global = ${kpis.total}.`
     );
 
     return recs;
-  }, [perMemberStats, fairness.avg, fairnessGap, kpis.baseTotal, kpis.periodTotal, kpis.total]);
+  }, [
+    analysisModeLabel,
+    distributionData,
+    fairness.avg,
+    fairnessGap,
+    kpis.baseTotal,
+    kpis.periodTotal,
+    kpis.total,
+    top3Most,
+  ]);
+
+  const rankedMemberStats = useMemo(() => {
+    const statsByMember = new Map(perMemberStats.map((member) => [member.memberId, member]));
+    return distributionData.flatMap((ranked) => {
+      const stats = statsByMember.get(ranked.memberId);
+      return stats ? [{ ...stats, rank: ranked.rank }] : [];
+    });
+  }, [distributionData, perMemberStats]);
 
   // -----------------------
   // EXPORTS
@@ -963,17 +1198,27 @@ export default function Insights() {
     clampDateStr(exportTo) || "…"
   }`;
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    if (!isDateRangeValid) return;
+
+    const XLSX = await import("xlsx");
+
     const wb = XLSX.utils.book_new();
     const generatedAt = format(new Date(), "dd/MM/yyyy HH:mm", { locale: frLocale });
 
     const summaryRows: any[][] = [
       ["RAPPORT PERMANENCES"],
       ["Période", `${clampDateStr(exportFrom) || "…"} → ${clampDateStr(exportTo) || "…"}`],
+      ["Mode d’analyse", analysisModeLabel],
       ["Généré le", generatedAt],
       ["Membres inclus", selectedCountLabel],
       [],
       ["INDICATEURS"],
+      [`Total — ${analysisModeLabel}`, activeMetricTotal],
+      [
+        "Moyenne totale par membre",
+        distributionData.length ? `${formattedAverageTotal} ${averageTotalUnit}` : "—",
+      ],
       [LABELS.total, kpis.total],
       [`${LABELS.solde} (Total)`, kpis.baseTotal],
       [`${LABELS.period} (Total)`, kpis.periodTotal],
@@ -991,6 +1236,7 @@ export default function Insights() {
 
     const totalsHeader = [
       [
+        "Priorité",
         "Membre",
         "Solde initial — Normal",
         "Solde initial — Férié",
@@ -1004,7 +1250,8 @@ export default function Insights() {
       ],
     ];
 
-    const totalsRows = perMemberStats.map((m) => [
+    const totalsRows = rankedMemberStats.map((m) => [
+      m.rank,
       m.name,
       m.baseNormal,
       m.baseHoliday,
@@ -1019,6 +1266,7 @@ export default function Insights() {
 
     const ws2 = XLSX.utils.aoa_to_sheet([...totalsHeader, ...totalsRows]);
     ws2["!cols"] = [
+      { wch: 10 },
       { wch: 28 },
       { wch: 18 },
       { wch: 18 },
@@ -1035,6 +1283,7 @@ export default function Insights() {
     if (exportIncludeMatrix) {
       const matrixHeader = [
         [
+          "Priorité",
           "Membre",
           "Solde initial — Normal",
           "Solde initial — Férié",
@@ -1046,6 +1295,7 @@ export default function Insights() {
       ];
 
       const matrixRows = weekdayMatrix.map((row) => [
+        row.rank,
         row.name,
         row.baseNormal,
         row.baseHoliday,
@@ -1057,6 +1307,7 @@ export default function Insights() {
 
       const ws3 = XLSX.utils.aoa_to_sheet([...matrixHeader, ...matrixRows]);
       ws3["!cols"] = [
+        { wch: 10 },
         { wch: 28 },
         { wch: 18 },
         { wch: 18 },
@@ -1113,11 +1364,19 @@ export default function Insights() {
 
   async function captureNode(node: HTMLElement | null) {
     if (!node) return null;
+    const { default: html2canvas } = await import("html2canvas");
     const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
     return canvas.toDataURL("image/png");
   }
 
   const exportPDF = async () => {
+    if (!isDateRangeValid) return;
+
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+
     const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
     const W = doc.internal.pageSize.getWidth();
     const margin = 44;
@@ -1137,7 +1396,7 @@ export default function Insights() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     doc.text(
-      `${clampDateStr(exportFrom) || "…"} → ${clampDateStr(exportTo) || "…"} • Généré le ${format(
+      `${clampDateStr(exportFrom) || "…"} → ${clampDateStr(exportTo) || "…"} • ${analysisModeLabel} • Généré le ${format(
         new Date(),
         "dd/MM/yyyy HH:mm",
         { locale: frLocale }
@@ -1151,10 +1410,13 @@ export default function Insights() {
     const boxH = 66;
 
     const kpiBoxes = [
-      { label: LABELS.total, value: String(kpis.total) },
-      { label: `${LABELS.solde} (Total)`, value: String(kpis.baseTotal) },
+      { label: `Total — ${analysisModeLabel}`, value: String(activeMetricTotal) },
+      {
+        label: "Moyenne totale par membre",
+        value: distributionData.length ? `${formattedAverageTotal} ${averageTotalUnit}` : "—",
+      },
       { label: `${LABELS.period} (Total)`, value: String(kpis.periodTotal) },
-      { label: "Week-end (période)", value: String(kpis.weekendPeriod) },
+      { label: LABELS.total, value: String(kpis.total) },
     ];
 
     kpiBoxes.forEach((b, i) => {
@@ -1209,13 +1471,14 @@ export default function Insights() {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
-    doc.text("Totaux (Solde + Période)", margin, cursorY + 14);
+    doc.text(`Classement — ${analysisModeLabel}`, margin, cursorY + 14);
     cursorY += 24;
 
     autoTable(doc, {
       startY: cursorY,
       head: [
         [
+          "Priorité",
           "Membre",
           "Solde initial — Normal",
           "Solde initial — Férié",
@@ -1226,7 +1489,8 @@ export default function Insights() {
           "Total global",
         ],
       ],
-      body: perMemberStats.map((m) => [
+      body: rankedMemberStats.map((m) => [
+        m.rank,
         m.name,
         m.baseNormal,
         m.baseHoliday,
@@ -1256,6 +1520,7 @@ export default function Insights() {
         startY: 76,
         head: [
           [
+            "Priorité",
             "Membre",
             "Solde initial — Normal",
             "Solde initial — Férié",
@@ -1266,6 +1531,7 @@ export default function Insights() {
           ],
         ],
         body: weekdayMatrix.map((row) => [
+          row.rank,
           row.name,
           row.baseNormal,
           row.baseHoliday,
@@ -1357,38 +1623,52 @@ export default function Insights() {
     [daysSinceLastHolidayDutyData, isMobile, showAllChartsMobile]
   );
 
-  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <LoadingState variant="cards" rows={4} />
+        <LoadingState variant="table" rows={6} />
+      </div>
+    );
+  }
 
   const matrixRowsFiltered = weekdayMatrix
     .filter((row) => row.name.toLowerCase().includes(matrixSearch.toLowerCase()))
     .filter((row) => !matrixOnlyActive || row.periodTotal > 0);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <AnimatedSection
+        delay={0}
+        className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between"
+      >
         <div className="space-y-1">
-          <div className="text-xl md:text-2xl font-bold">Aide à la décision</div>
-          <div className="text-sm text-muted-foreground">
+          <div className="text-xl md:text-2xl font-semibold tracking-tight">Aide à la décision</div>
+          <div className="text-sm text-muted-foreground max-w-2xl">
             Lecture rapide + filtres + indicateurs (Total global = Solde initial + Période).
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2 md:hidden">
-            <Badge variant="secondary">
-              Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}
-            </Badge>
-            <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
-            <Badge variant="outline">Total: {kpis.total}</Badge>
+            <StatusBadge tone="accent">
+              Période : {formatDateForDisplay(exportFrom)} → {formatDateForDisplay(exportTo)}
+            </StatusBadge>
+            <StatusBadge tone="neutral">Membres: {selectedCountLabel}</StatusBadge>
+            <StatusBadge tone="success">
+              Total: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
+            </StatusBadge>
           </div>
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center gap-2 md:justify-end">
           <div className="hidden md:flex flex-wrap gap-2 items-center">
-            <Badge variant="secondary">
-              Période: {clampDateStr(exportFrom)} → {clampDateStr(exportTo)}
-            </Badge>
-            <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
-            <Badge variant="outline">Total global: {kpis.total}</Badge>
+            <StatusBadge tone="accent">
+              Période : {formatDateForDisplay(exportFrom)} → {formatDateForDisplay(exportTo)}
+            </StatusBadge>
+            <StatusBadge tone="neutral">Membres: {selectedCountLabel}</StatusBadge>
+            <StatusBadge tone="success">
+              Total global: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
+            </StatusBadge>
           </div>
 
           <Dialog open={exportOpen} onOpenChange={setExportOpen}>
@@ -1409,21 +1689,29 @@ export default function Insights() {
                   <div className="space-y-1">
                     <div className="text-sm font-medium">Du</div>
                     <Input
+                      type="date"
                       value={exportFrom}
                       onChange={(e) => setExportFrom(e.target.value)}
-                      placeholder="YYYY-MM-DD"
+                      aria-invalid={!isDateRangeValid}
                     />
                   </div>
 
                   <div className="space-y-1">
                     <div className="text-sm font-medium">Au</div>
                     <Input
+                      type="date"
                       value={exportTo}
                       onChange={(e) => setExportTo(e.target.value)}
-                      placeholder="YYYY-MM-DD"
+                      aria-invalid={!isDateRangeValid}
                     />
                   </div>
                 </div>
+
+                {dateRangeError && (
+                  <p className="text-sm font-medium text-destructive" role="alert">
+                    {dateRangeError}
+                  </p>
+                )}
 
                 <div className="rounded-lg border p-3 space-y-2">
                   <div className="text-sm font-medium">Inclure</div>
@@ -1466,12 +1754,12 @@ export default function Insights() {
                   Fermer
                 </Button>
 
-                <Button variant="secondary" onClick={exportExcel}>
+                <Button variant="secondary" onClick={exportExcel} disabled={!isDateRangeValid}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
                   Excel
                 </Button>
 
-                <Button onClick={exportPDF}>
+                <Button onClick={exportPDF} disabled={!isDateRangeValid}>
                   <FileText className="h-4 w-4 mr-2" />
                   PDF
                 </Button>
@@ -1479,12 +1767,92 @@ export default function Insights() {
             </DialogContent>
           </Dialog>
         </div>
-      </div>
+      </AnimatedSection>
 
       {/* Sticky filters */}
       <Card className="md:sticky md:top-2 z-10">
         <CardContent className="py-4">
-          <div className="flex flex-wrap items-center gap-3">
+          <section aria-labelledby="analysis-period-title" className="border-b pb-3">
+            <h3 id="analysis-period-title" className="mb-2 text-sm font-semibold">
+              Période d’analyse
+            </h3>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+              <AnimatedSection
+                delay={0.06}
+                className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[390px]"
+              >
+                <div className="space-y-1">
+                  <label htmlFor="insights-date-from" className="text-xs font-medium text-muted-foreground">
+                    Du
+                  </label>
+                  <Input
+                    id="insights-date-from"
+                    type="date"
+                    value={exportFrom}
+                    onChange={(event) => setExportFrom(event.target.value)}
+                    aria-invalid={!isDateRangeValid}
+                    className="h-9"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="insights-date-to" className="text-xs font-medium text-muted-foreground">
+                    Au
+                  </label>
+                  <Input
+                    id="insights-date-to"
+                    type="date"
+                    value={exportTo}
+                    onChange={(event) => setExportTo(event.target.value)}
+                    aria-invalid={!isDateRangeValid}
+                    className="h-9"
+                  />
+                </div>
+              </AnimatedSection>
+
+              <AnimatedSection delay={0.12} className="space-y-1 lg:w-[210px]">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Mode d’analyse
+                </label>
+                <Select
+                  value={analysisMode}
+                  onValueChange={(value) => setAnalysisMode(value as AnalysisMode)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="period">Période sélectionnée</SelectItem>
+                    <SelectItem value="global">Cumul global</SelectItem>
+                  </SelectContent>
+                </Select>
+              </AnimatedSection>
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={applyCurrentMonth}>
+                  Ce mois
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={applyPreviousMonth}>
+                  Mois précédent
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={applyCurrentYear}>
+                  Cette année
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={applyAllData}>
+                  Toutes les données
+                </Button>
+              </div>
+            </div>
+
+            {dateRangeError && (
+              <p className="mt-2 text-sm font-medium text-destructive" role="alert">
+                {dateRangeError}
+              </p>
+            )}
+          </section>
+
+          <AnimatedSection delay={0.18} className="mt-3 flex flex-wrap items-center gap-3">
             <button type="button" className="text-sm underline" onClick={selectAll}>
               Tout sélectionner
             </button>
@@ -1502,14 +1870,20 @@ export default function Insights() {
             </button>
 
             <div className="ml-auto flex flex-wrap gap-2 justify-start md:justify-end">
-              <Badge variant="secondary">Solde: {kpis.baseTotal}</Badge>
-              <Badge variant="secondary">Période: {kpis.periodTotal}</Badge>
-              <Badge variant="secondary">Total global: {kpis.total}</Badge>
+              <StatusBadge tone="neutral">
+                Solde: <AnimatedNumber value={isDateRangeValid ? kpis.baseTotal : null} />
+              </StatusBadge>
+              <StatusBadge tone="accent">
+                Période: <AnimatedNumber value={isDateRangeValid ? kpis.periodTotal : null} />
+              </StatusBadge>
+              <StatusBadge tone="success">
+                Total global: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
+              </StatusBadge>
             </div>
-          </div>
+          </AnimatedSection>
 
-          {filterOpen && (
-            <div className="mt-4 border rounded-lg p-3">
+          <AnimatedPresencePanel show={filterOpen} className="mt-4">
+            <div className="border rounded-lg p-3">
               <input
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
@@ -1544,30 +1918,92 @@ export default function Insights() {
                 Tape pour chercher, puis coche/décoche.
               </div>
             </div>
-          )}
+          </AnimatedPresencePanel>
         </CardContent>
       </Card>
 
+      <AnimatePresence mode="wait" initial={false}>
+      {isDateRangeValid ? (
+        <m.div
+          key="insights-content"
+          initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+          transition={chartFadeTransition}
+          className="space-y-6"
+        >
       {/* KPI Cards */}
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-        <KpiCard label={LABELS.total} value={kpis.total} hint={`${LABELS.solde} + ${LABELS.period}`} />
-        <KpiCard label={`${LABELS.solde} (Total)`} value={kpis.baseTotal} hint="Crédits initiaux" />
-        <KpiCard label={`${LABELS.period} (Total)`} value={kpis.periodTotal} hint="Sur la période filtrée" />
-        <KpiCard label="Moyenne / membre (global)" value={kpis.avg} hint="Basée sur Total global" />
-      </div>
+      <StaggerContainer className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <StaggerItem>
+          <KpiCard
+            label={`Total — ${analysisModeLabel}`}
+            value={<AnimatedNumber value={activeMetricTotal} />}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <KpiCard
+            label={`Moyenne — ${analysisModeLabel}`}
+            value={
+              distributionData.length ? (
+                <AnimatedNumber
+                  value={averageTotal}
+                  format={(v) =>
+                    v.toLocaleString("fr-FR", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    })
+                  }
+                />
+              ) : (
+                "—"
+              )
+            }
+            hint={distributionData.length ? averageTotalUnit : undefined}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <KpiCard label="Total — Période sélectionnée" value={<AnimatedNumber value={kpis.periodTotal} />} />
+        </StaggerItem>
+        <StaggerItem>
+          <KpiCard label="Total — Cumul global" value={<AnimatedNumber value={kpis.total} />} />
+        </StaggerItem>
+      </StaggerContainer>
 
       {/* Distribution + fairness */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>Répartition par membre — Total global</CardTitle>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+            <CardTitle>Répartition par membre — {analysisModeLabel}</CardTitle>
+            <Badge variant="secondary" className="font-medium tabular-nums">
+              Moyenne :{" "}
+              {distributionData.length ? (
+                <AnimatedNumber
+                  value={averageTotal}
+                  format={(v) =>
+                    v.toLocaleString("fr-FR", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    })
+                  }
+                />
+              ) : (
+                "—"
+              )}{" "}
+              {distributionData.length ? averageTotalUnit : null}
+            </Badge>
           </CardHeader>
 
           <CardContent className="overflow-hidden">
             <div ref={refChartTotal} className="w-full">
               <div className="overflow-x-auto">
                 <div style={{ minWidth: getChartMinWidth(distributionDataForChart.length, isMobile) }}>
-                  <div className="h-[260px] md:h-[320px]">
+                  <m.div
+                    key={chartDatasetKey(distributionDataForChart, (d) => d.metric)}
+                    initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={chartFadeTransition}
+                    className="h-[260px] md:h-[320px]"
+                  >
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={distributionDataForChart}>
                         <XAxis
@@ -1581,19 +2017,59 @@ export default function Insights() {
                         />
                         <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                         <Tooltip
-                          formatter={(value: any, _n: any, props: any) => {
-                            const p = props?.payload;
-                            if (!p) return [value, "Total"];
-                            return [`${value}`, `Total • S:${p.baseTotal} • P:${p.periodTotal}`];
+                          content={({ active, payload }) => {
+                            const item = payload?.[0]?.payload as
+                              | (typeof distributionData)[number]
+                              | undefined;
+                            if (!active || !item) return null;
+
+                            const difference = item.metric - averageTotal;
+                            const formattedDifference = Math.abs(difference).toLocaleString("fr-FR", {
+                              minimumFractionDigits: 1,
+                              maximumFractionDigits: 1,
+                            });
+                            const differenceSign = difference > 0 ? "+" : difference < 0 ? "−" : "";
+                            const totalUnit = item.metric === 1 ? "jour" : "jours";
+                            const differenceUnit = Math.abs(difference) === 1 ? "jour" : "jours";
+
+                            return (
+                              <div className="rounded-md border bg-background p-3 text-xs shadow-md">
+                                <div className="font-semibold">{item.fullName}</div>
+                                <div className="mt-1 font-medium">Priorité n°{item.rank}</div>
+                                <div>Total : {item.metric} {totalUnit}</div>
+                                <div>Moyenne : {formattedAverageTotal} {averageTotalUnit}</div>
+                                <div>Écart : {differenceSign}{formattedDifference} {differenceUnit}</div>
+                              </div>
+                            );
                           }}
-                          labelFormatter={(_label: any, payload: any) =>
-                            payload?.[0]?.payload?.fullName ?? _label
-                          }
                         />
-                        <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
+                        <Bar
+                          dataKey="metric"
+                          fill="hsl(173, 58%, 39%)"
+                          radius={[6, 6, 0, 0]}
+                          isAnimationActive={!shouldReduceMotion}
+                          animationDuration={shouldReduceMotion ? 0 : 600}
+                          animationEasing="ease-out"
+                        />
+                        {distributionData.length > 0 && (
+                          <ReferenceLine
+                            y={averageTotal}
+                            stroke="hsl(var(--muted-foreground))"
+                            strokeDasharray="5 5"
+                            isAnimationActive={!shouldReduceMotion}
+                            animationDuration={shouldReduceMotion ? 0 : 600}
+                            animationEasing="ease-out"
+                            label={{
+                              value: `Moyenne : ${formattedAverageTotal} j`,
+                              position: "insideTopRight",
+                              fill: "hsl(var(--muted-foreground))",
+                              fontSize: 11,
+                            }}
+                          />
+                        )}
                       </BarChart>
                     </ResponsiveContainer>
-                  </div>
+                  </m.div>
                 </div>
               </div>
             </div>
@@ -1603,7 +2079,7 @@ export default function Insights() {
                 <div className="text-xs text-muted-foreground">
                   {showAllChartsMobile
                     ? `Affichage complet (${distributionData.length}).`
-                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                    : `${CHART_MOBILE_LIMIT} membres les moins chargés / les plus prioritaires.`}
                 </div>
 
                 <Button
@@ -1623,28 +2099,33 @@ export default function Insights() {
                 </div>
 
                 <div className="space-y-2">
-                  {top3Most.map((m, idx) => {
-                    const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉";
-                    const first = m.name.split(" ")[0];
+                  <AnimatedList
+                    as="div"
+                    items={top3Most}
+                    getKey={(member) => member.memberId}
+                    layout
+                    renderItem={(member, idx) => {
+                      const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉";
+                      const first = member.name.split(" ")[0];
 
-                    return (
-                      <div
-                        key={m.memberId}
-                        className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40"
-                      >
-                        <div className="min-w-0 flex items-center gap-3">
-                          <div className="shrink-0 text-lg">{medal}</div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold">{first}</div>
-                            <div className="truncate text-[11px] text-muted-foreground">
-                              S:{m.baseTotal} • P:{m.periodTotal}
+                      return (
+                        <div className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40">
+                          <div className="min-w-0 flex items-center gap-3">
+                            <div className="shrink-0 text-lg">{medal}</div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold">{first}</div>
+                              <div className="truncate text-[11px] text-muted-foreground">
+                                {analysisModeLabel}
+                              </div>
                             </div>
                           </div>
+                          <div className="shrink-0 text-lg font-bold tabular-nums">
+                            <AnimatedNumber value={member.metric} />
+                          </div>
                         </div>
-                        <div className="shrink-0 text-lg font-bold tabular-nums">{m.total}</div>
-                      </div>
-                    );
-                  })}
+                      );
+                    }}
+                  />
                 </div>
               </div>
 
@@ -1654,30 +2135,44 @@ export default function Insights() {
                 </div>
 
                 <div className="space-y-2">
-                  {top3Least.map((m) => {
-                    const first = m.name.split(" ")[0];
+                  <AnimatedList
+                    as="div"
+                    items={top3Least}
+                    getKey={(member) => member.memberId}
+                    layout
+                    renderItem={(member) => {
+                      const first = member.name.split(" ")[0];
 
-                    return (
-                      <div
-                        key={m.memberId}
-                        className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40"
-                      >
-                        <div className="min-w-0 flex items-center gap-3">
-                          <div className="shrink-0 text-lg opacity-70">🧊</div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold">{first}</div>
-                            <div className="truncate text-[11px] text-muted-foreground">
-                              S:{m.baseTotal} • P:{m.periodTotal}
+                      return (
+                        <div className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-muted/40">
+                          <div className="min-w-0 flex items-center gap-3">
+                            <div className="shrink-0 text-lg opacity-70">🧊</div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold">{first}</div>
+                              <div className="truncate text-[11px] text-muted-foreground">
+                                Priorité n°{member.rank} • {analysisModeLabel}
+                              </div>
                             </div>
                           </div>
+                          <div className="shrink-0 text-lg font-bold tabular-nums">
+                            <AnimatedNumber value={member.metric} />
+                          </div>
                         </div>
-                        <div className="shrink-0 text-lg font-bold tabular-nums">{m.total}</div>
-                      </div>
-                    );
-                  })}
+                      );
+                    }}
+                  />
                 </div>
               </div>
             </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              Le classement privilégie d’abord les membres les moins chargés, puis ceux qui
+              n’ont pas été planifiés depuis le plus longtemps.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              La ligne pointillée représente la moyenne des permanences de l’ensemble des membres
+              inclus dans l’analyse.
+            </p>
           </CardContent>
         </Card>
 
@@ -1689,19 +2184,27 @@ export default function Insights() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-center">
               <div>
-                <div className="text-2xl font-bold">{fairness.max}</div>
+                <div className="text-2xl font-bold">
+                  <AnimatedNumber value={fairness.max} />
+                </div>
                 <div className="text-sm text-muted-foreground">Plus chargé</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{fairness.min}</div>
+                <div className="text-2xl font-bold">
+                  <AnimatedNumber value={fairness.min} />
+                </div>
                 <div className="text-sm text-muted-foreground">Moins chargé</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{fairness.avg}</div>
+                <div className="text-2xl font-bold">
+                  <AnimatedNumber value={fairness.avg} format={(v) => v.toFixed(1)} />
+                </div>
                 <div className="text-sm text-muted-foreground">Moyenne</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{fairnessGap}</div>
+                <div className="text-2xl font-bold">
+                  <AnimatedNumber value={fairnessGap} />
+                </div>
                 <div className="text-sm text-muted-foreground">Écart (max-min)</div>
               </div>
             </div>
@@ -1716,9 +2219,9 @@ export default function Insights() {
                 <div
                   className={cn(
                     "h-2",
-                    fairnessGap <= 2 && "bg-green-600",
-                    fairnessGap > 2 && fairnessGap <= 5 && "bg-yellow-500",
-                    fairnessGap > 5 && "bg-red-600"
+                    fairnessGap <= 2 && "bg-success",
+                    fairnessGap > 2 && fairnessGap <= 5 && "bg-warning",
+                    fairnessGap > 5 && "bg-destructive"
                   )}
                   style={{
                     width: `${Math.min(100, Math.max(10, (fairnessGap / 10) * 100))}%`,
@@ -1750,14 +2253,20 @@ export default function Insights() {
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Comparatif — {LABELS.normal} (global)</CardTitle>
+            <CardTitle>Permanences normales — {analysisModeLabel}</CardTitle>
           </CardHeader>
 
           <CardContent className="overflow-hidden">
             <div ref={refChartNormal} className="w-full">
               <div className="overflow-x-auto">
                 <div style={{ minWidth: getChartMinWidth(normalChartDataForChart.length, isMobile) }}>
-                  <div className="h-[260px] md:h-[320px]">
+                  <m.div
+                    key={chartDatasetKey(normalChartDataForChart, (d) => d.count)}
+                    initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={chartFadeTransition}
+                    className="h-[260px] md:h-[320px]"
+                  >
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={normalChartDataForChart}>
                         <XAxis
@@ -1773,18 +2282,30 @@ export default function Insights() {
                         <Tooltip
                           formatter={(value: any, _name: any, props: any) => {
                             const p = props?.payload;
-                            if (!p) return [value, LABELS.normal];
-                            return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.normal];
+                            if (!p) return [value, analysisModeLabel];
+                            return [value, analysisModeLabel];
                           }}
                           labelFormatter={(_label: any, payload: any) =>
-                            payload?.[0]?.payload?.fullName ?? _label
+                            payload?.[0]?.payload
+                              ? `Priorité n°${payload[0].payload.rank} — ${payload[0].payload.fullName}`
+                              : _label
                           }
                         />
-                        <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                        <Bar
+                          dataKey="count"
+                          fill="#2563EB"
+                          radius={[6, 6, 0, 0]}
+                          isAnimationActive={!shouldReduceMotion}
+                          animationDuration={shouldReduceMotion ? 0 : 600}
+                          animationEasing="ease-out"
+                        />
                         <ReferenceLine
                           y={avgNormalGlobal}
                           stroke="#111827"
                           strokeWidth={3}
+                          isAnimationActive={!shouldReduceMotion}
+                          animationDuration={shouldReduceMotion ? 0 : 600}
+                          animationEasing="ease-out"
                           label={{
                             value: `Moyenne: ${avgNormalGlobal.toFixed(1)}`,
                             position: "top",
@@ -1795,7 +2316,7 @@ export default function Insights() {
                         />
                       </BarChart>
                     </ResponsiveContainer>
-                  </div>
+                  </m.div>
                 </div>
               </div>
             </div>
@@ -1805,7 +2326,7 @@ export default function Insights() {
                 <div className="text-xs text-muted-foreground">
                   {showAllChartsMobile
                     ? `Affichage complet (${normalChartData.length}).`
-                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                    : `${CHART_MOBILE_LIMIT} membres les moins chargés / les plus prioritaires.`}
                 </div>
 
                 <Button
@@ -1817,19 +2338,29 @@ export default function Insights() {
                 </Button>
               </div>
             )}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Le classement privilégie d’abord les membres les moins chargés, puis ceux qui
+              n’ont pas été planifiés depuis le plus longtemps.
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Comparatif — {LABELS.holiday} (global)</CardTitle>
+            <CardTitle>Permanences fériées / week-ends — {analysisModeLabel}</CardTitle>
           </CardHeader>
 
           <CardContent className="overflow-hidden">
             <div ref={refChartHoliday} className="w-full">
               <div className="overflow-x-auto">
                 <div style={{ minWidth: getChartMinWidth(holidayChartDataForChart.length, isMobile) }}>
-                  <div className="h-[260px] md:h-[320px]">
+                  <m.div
+                    key={chartDatasetKey(holidayChartDataForChart, (d) => d.count)}
+                    initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={chartFadeTransition}
+                    className="h-[260px] md:h-[320px]"
+                  >
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={holidayChartDataForChart}>
                         <XAxis
@@ -1845,18 +2376,30 @@ export default function Insights() {
                         <Tooltip
                           formatter={(value: any, _name: any, props: any) => {
                             const p = props?.payload;
-                            if (!p) return [value, LABELS.holiday];
-                            return [`${value} (Solde ${p.base} + Période ${p.period})`, LABELS.holiday];
+                            if (!p) return [value, analysisModeLabel];
+                            return [value, analysisModeLabel];
                           }}
                           labelFormatter={(_label: any, payload: any) =>
-                            payload?.[0]?.payload?.fullName ?? _label
+                            payload?.[0]?.payload
+                              ? `Priorité n°${payload[0].payload.rank} — ${payload[0].payload.fullName}`
+                              : _label
                           }
                         />
-                        <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
+                        <Bar
+                          dataKey="count"
+                          fill="#F97316"
+                          radius={[6, 6, 0, 0]}
+                          isAnimationActive={!shouldReduceMotion}
+                          animationDuration={shouldReduceMotion ? 0 : 600}
+                          animationEasing="ease-out"
+                        />
                         <ReferenceLine
                           y={avgHolidayGlobal}
                           stroke="#111827"
                           strokeWidth={3}
+                          isAnimationActive={!shouldReduceMotion}
+                          animationDuration={shouldReduceMotion ? 0 : 600}
+                          animationEasing="ease-out"
                           label={{
                             value: `Moyenne: ${avgHolidayGlobal.toFixed(1)}`,
                             position: "top",
@@ -1867,7 +2410,7 @@ export default function Insights() {
                         />
                       </BarChart>
                     </ResponsiveContainer>
-                  </div>
+                  </m.div>
                 </div>
               </div>
             </div>
@@ -1877,7 +2420,7 @@ export default function Insights() {
                 <div className="text-xs text-muted-foreground">
                   {showAllChartsMobile
                     ? `Affichage complet (${holidayChartData.length}).`
-                    : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                    : `${CHART_MOBILE_LIMIT} membres les moins chargés / les plus prioritaires.`}
                 </div>
 
                 <Button
@@ -1889,6 +2432,10 @@ export default function Insights() {
                 </Button>
               </div>
             )}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Le classement privilégie d’abord les membres les moins chargés, puis ceux qui
+              n’ont pas été planifiés depuis le plus longtemps.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -1956,30 +2503,37 @@ export default function Insights() {
                 </TableHeader>
 
                 <TableBody>
-                  {matrixRowsFiltered.map((row) => (
-                    <TableRow key={row.memberId} className="hover:bg-muted/50">
-                      <TableCell className={TD_LEFT}>
-                        <div className="truncate font-medium">{row.name}</div>
-                      </TableCell>
-
-                      <TableCell className="text-right">{row.baseNormal}</TableCell>
-                      <TableCell className="text-right">{row.baseHoliday}</TableCell>
-                      <TableCell className="text-right font-semibold">{row.baseTotal}</TableCell>
-
-                      {row.weekdayCountsPeriod.map((v, idx) => (
-                        <TableCell key={idx} className="text-right">
-                          {v === 0 ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : (
-                            <span className="font-semibold">{v}</span>
-                          )}
+                  <AnimatedList
+                    as="tr"
+                    items={matrixRowsFiltered}
+                    getKey={(row) => row.memberId}
+                    layout
+                    itemClassName="hover:bg-muted/50"
+                    renderItem={(row) => (
+                      <>
+                        <TableCell className={TD_LEFT}>
+                          <div className="truncate font-medium">{row.name}</div>
                         </TableCell>
-                      ))}
 
-                      <TableCell className="text-right font-semibold">{row.periodTotal}</TableCell>
-                      <TableCell className="text-right font-bold">{row.totalGlobal}</TableCell>
-                    </TableRow>
-                  ))}
+                        <TableCell className="text-right">{row.baseNormal}</TableCell>
+                        <TableCell className="text-right">{row.baseHoliday}</TableCell>
+                        <TableCell className="text-right font-semibold">{row.baseTotal}</TableCell>
+
+                        {row.weekdayCountsPeriod.map((v, idx) => (
+                          <TableCell key={idx} className="text-right">
+                            {v === 0 ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <span className="font-semibold">{v}</span>
+                            )}
+                          </TableCell>
+                        ))}
+
+                        <TableCell className="text-right font-semibold">{row.periodTotal}</TableCell>
+                        <TableCell className="text-right font-bold">{row.totalGlobal}</TableCell>
+                      </>
+                    )}
+                  />
                 </TableBody>
               </Table>
             </div>
@@ -1994,7 +2548,7 @@ export default function Insights() {
       {/* Totals table */}
       <Card>
         <CardHeader>
-          <CardTitle>Totaux</CardTitle>
+          <CardTitle>Totaux — {analysisModeLabel}</CardTitle>
         </CardHeader>
 
         <CardContent className="overflow-hidden">
@@ -2022,7 +2576,7 @@ export default function Insights() {
                   <SelectItem value="name">Membre</SelectItem>
                   <SelectItem value="totalNormal">Total jours normaux</SelectItem>
                   <SelectItem value="totalHoliday">Total jours fériés</SelectItem>
-                  <SelectItem value="total">Total global</SelectItem>
+                  <SelectItem value="total">Total — {analysisModeLabel}</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -2086,7 +2640,7 @@ export default function Insights() {
               </div>
 
               <div className="rounded-lg border p-3 space-y-2">
-                <div className="text-sm font-medium">Total global</div>
+                <div className="text-sm font-medium">Total — {analysisModeLabel}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     type="number"
@@ -2107,7 +2661,8 @@ export default function Insights() {
             </div>
 
             <div className="text-sm text-muted-foreground">
-              Le tableau est filtré par nom, totaux normaux, totaux fériés et total global.
+              Le tableau utilise le mode « {analysisModeLabel} ». Par défaut, la priorité va aux
+              totaux les plus faibles, puis aux attentes les plus longues.
             </div>
           </div>
 
@@ -2119,6 +2674,7 @@ export default function Insights() {
                 <TableHeader className="bg-background">
                   <TableRow>
                     <TableHead className={TH_TOP_LEFT}>Membre</TableHead>
+                    <TableHead className={cn(TH_TOP, "w-20 text-center py-1 px-2 text-xs")}>Priorité</TableHead>
 
                     <TableHead className={cn(TH_TOP, "text-right py-1 px-2 text-xs")}>
                       Normaux
@@ -2135,23 +2691,33 @@ export default function Insights() {
                 </TableHeader>
 
                 <TableBody>
-                  {totalsTableRows.map((r) => (
-                    <TableRow key={r.memberId} className="hover:bg-muted/50">
-                      <TableCell className={`${TD_LEFT} py-1 px-2`}>
-                        <div className="truncate font-medium">{r.name}</div>
-                      </TableCell>
+                  <AnimatedList
+                    as="tr"
+                    items={totalsTableRows}
+                    getKey={(r) => r.memberId}
+                    layout
+                    itemClassName="hover:bg-muted/50"
+                    renderItem={(r) => (
+                      <>
+                        <TableCell className={`${TD_LEFT} py-1 px-2`}>
+                          <div className="truncate font-medium">{r.name}</div>
+                        </TableCell>
+                        <TableCell className="text-center font-semibold py-1 px-2">
+                          n°{r.rank}
+                        </TableCell>
 
-                      <TableCell className="text-right font-semibold py-1 px-2">
-                        {r.totalNormal}
-                      </TableCell>
-                      <TableCell className="text-right font-semibold py-1 px-2">
-                        {r.totalHoliday}
-                      </TableCell>
-                      <TableCell className="text-right font-bold py-1 px-2">
-                        {r.total}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        <TableCell className="text-right font-semibold py-1 px-2">
+                          {r.totalNormal}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold py-1 px-2">
+                          {r.totalHoliday}
+                        </TableCell>
+                        <TableCell className="text-right font-bold py-1 px-2">
+                          <AnimatedNumber value={r.total} />
+                        </TableCell>
+                      </>
+                    )}
+                  />
                 </TableBody>
               </Table>
             </div>
@@ -2162,14 +2728,20 @@ export default function Insights() {
       {/* Days since last duty */}
       <Card>
         <CardHeader>
-          <CardTitle>Days since last duty</CardTitle>
+          <CardTitle>Ancienneté — dernière permanence</CardTitle>
         </CardHeader>
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
               <div style={{ minWidth: getChartMinWidth(daysSinceLastDutyDataForChart.length, isMobile) }}>
-                <div className="h-[260px] md:h-[320px]">
+                <m.div
+                  key={chartDatasetKey(daysSinceLastDutyDataForChart, (d) => d.displayDays)}
+                  initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={chartFadeTransition}
+                  className="h-[260px] md:h-[320px]"
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={daysSinceLastDutyDataForChart}>
                       <XAxis
@@ -2183,19 +2755,27 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
-                        formatter={(value: any, _name: any, props: any) => {
-                          const hasValue = props?.payload?.hasValue;
-                          if (!hasValue) return ["Jamais", "Jours"];
-                          return [value, "Jours"];
+                        formatter={(_value: any, _name: any, props: any) => {
+                          const days = props?.payload?.days;
+                          return [days === null ? "Jamais" : days, "Jours"];
                         }}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="displayDays"
+                        fill="hsl(160, 60%, 45%)"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      >
+                        <LabelList dataKey="displayLabel" position="top" fontSize={10} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </m.div>
               </div>
             </div>
           </div>
@@ -2205,7 +2785,7 @@ export default function Insights() {
               <div className="text-xs text-muted-foreground">
                 {showAllChartsMobile
                   ? `Affichage complet (${daysSinceLastDutyData.length}).`
-                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                  : `${CHART_MOBILE_LIMIT} membres en attente depuis le plus longtemps.`}
               </div>
 
               <Button
@@ -2219,21 +2799,28 @@ export default function Insights() {
           )}
 
           <div className="text-xs text-muted-foreground mt-2">
-            Grande barre = personne non planifiée depuis longtemps. “Jamais” est volontairement mis très haut.
+            Les membres jamais planifiés apparaissent d’abord. Leur hauteur est uniquement
+            visuelle et le tooltip affiche toujours « Jamais ».
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Days since last NORMAL duty</CardTitle>
+          <CardTitle>Ancienneté — dernière permanence normale</CardTitle>
         </CardHeader>
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
               <div style={{ minWidth: getChartMinWidth(daysSinceLastNormalDutyDataForChart.length, isMobile) }}>
-                <div className="h-[260px] md:h-[320px]">
+                <m.div
+                  key={chartDatasetKey(daysSinceLastNormalDutyDataForChart, (d) => d.displayDays)}
+                  initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={chartFadeTransition}
+                  className="h-[260px] md:h-[320px]"
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={daysSinceLastNormalDutyDataForChart}>
                       <XAxis
@@ -2247,19 +2834,27 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
-                        formatter={(value: any, _name: any, props: any) => {
-                          const hasValue = props?.payload?.hasValue;
-                          if (!hasValue) return ["Jamais", "Jours"];
-                          return [value, "Jours"];
+                        formatter={(_value: any, _name: any, props: any) => {
+                          const days = props?.payload?.days;
+                          return [days === null ? "Jamais" : days, "Jours"];
                         }}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="displayDays"
+                        fill="#2563EB"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      >
+                        <LabelList dataKey="displayLabel" position="top" fontSize={10} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </m.div>
               </div>
             </div>
           </div>
@@ -2269,7 +2864,7 @@ export default function Insights() {
               <div className="text-xs text-muted-foreground">
                 {showAllChartsMobile
                   ? `Affichage complet (${daysSinceLastNormalDutyData.length}).`
-                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                  : `${CHART_MOBILE_LIMIT} membres en attente depuis le plus longtemps.`}
               </div>
 
               <Button
@@ -2290,14 +2885,20 @@ export default function Insights() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Days since last HOLIDAY duty</CardTitle>
+          <CardTitle>Ancienneté — dernière permanence fériée / week-end</CardTitle>
         </CardHeader>
 
         <CardContent className="overflow-hidden">
           <div className="w-full">
             <div className="overflow-x-auto">
               <div style={{ minWidth: getChartMinWidth(daysSinceLastHolidayDutyDataForChart.length, isMobile) }}>
-                <div className="h-[260px] md:h-[320px]">
+                <m.div
+                  key={chartDatasetKey(daysSinceLastHolidayDutyDataForChart, (d) => d.displayDays)}
+                  initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={chartFadeTransition}
+                  className="h-[260px] md:h-[320px]"
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={daysSinceLastHolidayDutyDataForChart}>
                       <XAxis
@@ -2311,19 +2912,27 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
-                        formatter={(value: any, _name: any, props: any) => {
-                          const hasValue = props?.payload?.hasValue;
-                          if (!hasValue) return ["Jamais", "Jours"];
-                          return [value, "Jours"];
+                        formatter={(_value: any, _name: any, props: any) => {
+                          const days = props?.payload?.days;
+                          return [days === null ? "Jamais" : days, "Jours"];
                         }}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="days" fill="#F97316" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="displayDays"
+                        fill="#F97316"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      >
+                        <LabelList dataKey="displayLabel" position="top" fontSize={10} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
+                </m.div>
               </div>
             </div>
           </div>
@@ -2333,7 +2942,7 @@ export default function Insights() {
               <div className="text-xs text-muted-foreground">
                 {showAllChartsMobile
                   ? `Affichage complet (${daysSinceLastHolidayDutyData.length}).`
-                  : `Affichage limité aux ${CHART_MOBILE_LIMIT} premiers.`}
+                  : `${CHART_MOBILE_LIMIT} membres en attente depuis le plus longtemps.`}
               </div>
 
               <Button
@@ -2351,6 +2960,23 @@ export default function Insights() {
           </div>
         </CardContent>
       </Card>
+        </m.div>
+      ) : (
+        <m.div
+          key="insights-empty"
+          initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+          transition={chartFadeTransition}
+        >
+          <Card className="border-destructive/40">
+            <CardContent className="py-8 text-center text-sm text-muted-foreground">
+              Corrigez la période pour afficher les indicateurs et les analyses.
+            </CardContent>
+          </Card>
+        </m.div>
+      )}
+      </AnimatePresence>
     </div>
   );
 }

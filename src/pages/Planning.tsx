@@ -24,6 +24,10 @@ import {
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import AutoPlanDialog from '@/components/planning/AutoPlanDialog';
+import * as m from 'motion/react-m';
+import { useReducedMotion } from 'motion/react';
+import { AnimatedSection, AnimatedList } from '@/components/motion';
+import { staggerItem } from '@/lib/motion';
 
 interface DutyEntry {
   id: string;
@@ -46,6 +50,7 @@ interface Holiday {
 
 export default function Planning() {
   const { isAdmin } = useAuthContext();
+  const shouldReduceMotion = useReducedMotion();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [duties, setDuties] = useState<DutyEntry[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -154,9 +159,9 @@ export default function Planning() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
@@ -193,9 +198,10 @@ export default function Planning() {
             {fr.autoPlan.title}
           </Button>
         </div>
-      </div>
+      </AnimatedSection>
 
       {/* Calendar Grid */}
+      <AnimatedSection delay={0.06}>
       <Card>
         <CardContent className="p-4">
           {/* Weekday Headers */}
@@ -211,10 +217,16 @@ export default function Planning() {
           </div>
 
           {/* Calendar Days */}
-          <div className="grid grid-cols-7 gap-1">
+          <m.div
+            key={format(currentMonth, 'yyyy-MM')}
+            className="grid grid-cols-7 gap-1"
+            variants={shouldReduceMotion ? undefined : { animate: { transition: { staggerChildren: 0.012, delayChildren: 0.03 } } }}
+            initial="initial"
+            animate="animate"
+          >
             {/* Padding for days before month start */}
             {[...Array(paddingDays)].map((_, i) => (
-              <div key={`pad-${i}`} className="min-h-[100px] bg-muted/30 rounded-lg" />
+              <div key={`pad-${i}`} className="min-h-[64px] sm:min-h-[100px] bg-muted/30 rounded-lg" />
             ))}
 
             {/* Actual days */}
@@ -227,7 +239,10 @@ export default function Planning() {
               return (
                 <Sheet key={day.toISOString()}>
                   <SheetTrigger asChild>
-                    <button
+                    <m.button
+                      variants={shouldReduceMotion ? undefined : staggerItem}
+                      whileHover={shouldReduceMotion ? undefined : { scale: 1.02, transition: { duration: 0.15 } }}
+                      whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
                       onClick={() => setSelectedDate(day)}
                       className={cn(
                         'calendar-day text-left flex flex-col',
@@ -269,7 +284,7 @@ export default function Planning() {
                           </div>
                         )}
                       </div>
-                    </button>
+                    </m.button>
                   </SheetTrigger>
 
                   <SheetContent>
@@ -301,43 +316,45 @@ export default function Planning() {
                             {fr.planning.noDuties}
                           </p>
                         ) : (
-                          dayDuties.map((duty) => (
-                            <div
-                              key={duty.id}
-                              className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                            >
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">
-                                    {duty.team_member?.full_name || 'Non assigné'}
-                                  </span>
-                                  {duty.team_member?.active === false && (
-                                    <Badge variant="destructive" className="text-xs">
-                                      Inactif
+                          <AnimatedList
+                            items={dayDuties}
+                            getKey={(duty) => duty.id}
+                            renderItem={(duty) => (
+                              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">
+                                      {duty.team_member?.full_name || 'Non assigné'}
+                                    </span>
+                                    {duty.team_member?.active === false && (
+                                      <Badge variant="destructive" className="text-xs">
+                                        Inactif
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge variant="secondary">
+                                      {fr.duty.types[duty.duty_type as keyof typeof fr.duty.types] || duty.duty_type}
                                     </Badge>
+                                  </div>
+                                  {duty.notes && (
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                      {duty.notes}
+                                    </p>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Badge variant="secondary">
-                                    {fr.duty.types[duty.duty_type as keyof typeof fr.duty.types] || duty.duty_type}
-                                  </Badge>
-                                </div>
-                                {duty.notes && (
-                                  <p className="text-sm text-muted-foreground mt-1">
-                                    {duty.notes}
-                                  </p>
-                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteDuty(duty.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteDuty(duty.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))
+                            )}
+                            itemClassName="mb-3 last:mb-0"
+                          />
                         )}
                       </div>
                     </div>
@@ -345,11 +362,13 @@ export default function Planning() {
                 </Sheet>
               );
             })}
-          </div>
+          </m.div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Legend */}
+      <AnimatedSection delay={0.12}>
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap gap-4 text-sm">
@@ -376,9 +395,10 @@ export default function Planning() {
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Auto-Plan Dialog */}
-      <AutoPlanDialog 
+      <AutoPlanDialog
         open={autoPlanOpen} 
         onOpenChange={setAutoPlanOpen}
         onPlanApplied={fetchData}

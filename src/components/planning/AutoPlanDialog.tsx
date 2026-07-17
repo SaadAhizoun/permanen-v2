@@ -17,6 +17,8 @@ import { format, eachDayOfInterval, isWeekend, addDays, getISOWeek, getYear } fr
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { AnimatedPresencePanel } from '@/components/motion';
+import * as m from 'motion/react-m';
 
 
 interface TeamMember {
@@ -395,7 +397,7 @@ if (strategy === 'roundRobin') {
           </Button>
 
           {/* Results Preview */}
-          {proposedPlan.length > 0 && (
+          <AnimatedPresencePanel show={proposedPlan.length > 0}>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h4 className="font-medium">{fr.autoPlan.preview}</h4>
@@ -427,8 +429,14 @@ if (strategy === 'roundRobin') {
                     </tr>
                   </thead>
                   <tbody>
-                    {proposedPlan.map((p, i) => (
-                      <tr key={i} className={cn('border-t', p.conflict && 'bg-destructive/5')}>
+                    {proposedPlan.map((p) => (
+                      <m.tr
+                        key={`${format(p.date, 'yyyy-MM-dd')}-${p.memberId}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className={cn('border-t', p.conflict && 'bg-destructive/5')}
+                      >
                         <td className="p-2">{format(p.date, 'EEE d MMM', { locale: frLocale })}</td>
                         <td className="p-2">{p.memberName}</td>
                         <td className="p-2">
@@ -438,7 +446,7 @@ if (strategy === 'roundRobin') {
                             <Badge variant="secondary" className="text-xs bg-success text-success-foreground">OK</Badge>
                           )}
                         </td>
-                      </tr>
+                      </m.tr>
                     ))}
                   </tbody>
                 </table>
@@ -453,7 +461,7 @@ if (strategy === 'roundRobin') {
                 </Alert>
               )}
             </div>
-          )}
+          </AnimatedPresencePanel>
         </div>
 
         <DialogFooter>

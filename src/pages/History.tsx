@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import { supabase } from "@/integrations/supabase/client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadingState, EmptyState, StatusBadge } from "@/components/shared";
 
 import {
   Table,
@@ -30,6 +31,15 @@ import {
 
 import { differenceInCalendarDays, format } from "date-fns";
 
+import {
+  AnimatedList,
+  AnimatedNumber,
+  AnimatedPresencePanel,
+  AnimatedSection,
+  StaggerContainer,
+  StaggerItem,
+} from "@/components/motion";
+
 // ---------------- Types ----------------
 type Member = {
   id: string;
@@ -46,10 +56,6 @@ type Duty = {
 const weekdayLabels = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"] as const;
 
 // ---------------- Helpers ----------------
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
-}
-
 function shortName(full: string) {
   const parts = full.trim().split(/\s+/);
   return parts[0] || full;
@@ -132,6 +138,7 @@ async function fetchAllDutiesPaged() {
 // ---------------- Component ----------------
 export default function History() {
   const [loading, setLoading] = useState(true);
+  const shouldReduceMotion = useReducedMotion();
   const isMobile = useIsMobile();
   const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
 
@@ -474,11 +481,18 @@ export default function History() {
     return map;
   }, [perMember]);
 
-  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <LoadingState variant="cards" rows={4} />
+        <LoadingState variant="table" rows={6} />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+    <div className="space-y-6">
+      <AnimatedSection className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
           <div className="text-xl md:text-2xl font-bold">Historique — Permanences</div>
           <div className="text-sm text-muted-foreground">
@@ -500,8 +514,9 @@ export default function History() {
             Actualiser
           </Button>
         </div>
-      </div>
+      </AnimatedSection>
 
+      <AnimatedSection delay={0.06}>
       <Card className="md:sticky md:top-2 z-10">
         <CardContent className="py-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -587,7 +602,7 @@ export default function History() {
             </div>
           </div>
 
-          {filterOpen && (
+          <AnimatedPresencePanel show={filterOpen}>
             <div className="mt-4 border rounded-lg p-3">
               <div className="relative w-full">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -626,45 +641,62 @@ export default function History() {
                 Astuce: laisse vide (0 sélection) pour “tous les membres”.
               </div>
             </div>
-          )}
+          </AnimatedPresencePanel>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+      <StaggerContainer className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <StaggerItem>
         <Card>
           <CardContent className="py-4 md:py-5">
             <div className="text-sm text-muted-foreground">Total (période)</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.total}</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
+              <AnimatedNumber value={kpis.total} />
+            </div>
             <div className="text-xs text-muted-foreground mt-1">
               {clampDateStr(periodFrom)} → {clampDateStr(periodTo)}
             </div>
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <Card>
           <CardContent className="py-4 md:py-5">
             <div className="text-sm text-muted-foreground">Jours normaux</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.normal}</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
+              <AnimatedNumber value={kpis.normal} />
+            </div>
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <Card>
           <CardContent className="py-4 md:py-5">
             <div className="text-sm text-muted-foreground">Jours fériés</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.holiday}</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
+              <AnimatedNumber value={kpis.holiday} />
+            </div>
           </CardContent>
         </Card>
+        </StaggerItem>
 
+        <StaggerItem>
         <Card>
           <CardContent className="py-4 md:py-5">
             <div className="text-sm text-muted-foreground">Moyenne / membre</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">{kpis.avg}</div>
+            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
+              <AnimatedNumber value={kpis.avg} format={(v) => v.toFixed(1)} />
+            </div>
             <div className="text-xs text-muted-foreground mt-1">sur la période</div>
           </CardContent>
         </Card>
-      </div>
+        </StaggerItem>
+      </StaggerContainer>
 
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+      <AnimatedSection delay={0.12} className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Répartition par membre — Total (période)</CardTitle>
@@ -697,7 +729,14 @@ export default function History() {
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="total" fill="hsl(173, 58%, 39%)" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="total"
+                        fill="hsl(173, 58%, 39%)"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      />
                       <ReferenceLine
                         y={avgTotal}
                         stroke="#111827"
@@ -768,7 +807,14 @@ export default function History() {
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="count" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="count"
+                        fill="#2563EB"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      />
                       <ReferenceLine
                         y={avgNormal}
                         stroke="#111827"
@@ -839,7 +885,14 @@ export default function History() {
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="count" fill="#F97316" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="count"
+                        fill="#F97316"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      />
                       <ReferenceLine
                         y={avgHoliday}
                         stroke="#111827"
@@ -914,7 +967,14 @@ export default function History() {
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="days" fill="hsl(160, 60%, 45%)" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="days"
+                        fill="hsl(160, 60%, 45%)"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -963,7 +1023,14 @@ export default function History() {
                           payload?.[0]?.payload?.fullName ?? _label
                         }
                       />
-                      <Bar dataKey="days" fill="#2563EB" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="days"
+                        fill="#2563EB"
+                        radius={[6, 6, 0, 0]}
+                        isAnimationActive={!shouldReduceMotion}
+                        animationDuration={shouldReduceMotion ? 0 : 600}
+                        animationEasing="ease-out"
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -971,8 +1038,9 @@ export default function History() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </AnimatedSection>
 
+      <AnimatedSection delay={0.16}>
       <Card>
         <CardHeader>
           <CardTitle>Résumé — Par membre</CardTitle>
@@ -1016,40 +1084,49 @@ export default function History() {
               </TableHeader>
 
               <TableBody>
-                {summaryRows.map((m) => {
-                  const last = m.lastDutyDateUTC
-                    ? formatFrFromYYYYMMDD(format(m.lastDutyDateUTC, "yyyy-MM-dd"))
-                    : "—";
+                <AnimatedList
+                  items={summaryRows}
+                  getKey={(row) => row.memberId}
+                  as="tr"
+                  maxAnimated={18}
+                  itemClassName="border-b transition-colors hover:bg-muted/50"
+                  renderItem={(m) => {
+                    const last = m.lastDutyDateUTC
+                      ? formatFrFromYYYYMMDD(format(m.lastDutyDateUTC, "yyyy-MM-dd"))
+                      : "—";
 
-                  const lastN = m.lastNormalDutyDateUTC
-                    ? formatFrFromYYYYMMDD(format(m.lastNormalDutyDateUTC, "yyyy-MM-dd"))
-                    : "—";
+                    const lastN = m.lastNormalDutyDateUTC
+                      ? formatFrFromYYYYMMDD(format(m.lastNormalDutyDateUTC, "yyyy-MM-dd"))
+                      : "—";
 
-                  return (
-                    <TableRow key={m.memberId} className="hover:bg-muted/50">
-                      <TableCell className="font-medium">{m.name}</TableCell>
-                      <TableCell className="text-right">{m.periodNormal}</TableCell>
-                      <TableCell className="text-right">{m.periodHoliday}</TableCell>
-                      <TableCell className="text-right font-bold">{m.periodTotal}</TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">
-                        {last}
-                      </TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">
-                        {lastN}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                    return (
+                      <>
+                        <TableCell className="font-medium">{m.name}</TableCell>
+                        <TableCell className="text-right">{m.periodNormal}</TableCell>
+                        <TableCell className="text-right">{m.periodHoliday}</TableCell>
+                        <TableCell className="text-right font-bold">{m.periodTotal}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {last}
+                        </TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {lastN}
+                        </TableCell>
+                      </>
+                    );
+                  }}
+                />
               </TableBody>
             </Table>
 
             {summaryRows.length === 0 && (
-              <div className="p-6 text-sm text-muted-foreground">Aucun résultat.</div>
+              <EmptyState icon={<Search />} title="Aucun résultat" description="Aucun membre ne correspond à cette recherche." />
             )}
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
+      <AnimatedSection delay={0.2}>
       <Card>
         <CardHeader>
           <CardTitle>Jours travaillés — Détails par membre</CardTitle>
@@ -1060,67 +1137,68 @@ export default function History() {
           </div>
 
           <div className="space-y-3">
-            {summaryRows.map((m) => {
-              const pack = daysByMember.get(m.memberId);
-              const all = pack?.all || [];
-              const normalSet = pack?.normal || new Set<string>();
-              const holidaySet = pack?.holiday || new Set<string>();
+            <AnimatedList
+              items={summaryRows}
+              getKey={(row) => row.memberId}
+              as="div"
+              maxAnimated={15}
+              renderItem={(m) => {
+                const pack = daysByMember.get(m.memberId);
+                const all = pack?.all || [];
+                const holidaySet = pack?.holiday || new Set<string>();
 
-              return (
-                <details key={m.memberId} className="rounded-xl border bg-background p-3">
-                  <summary className="cursor-pointer list-none">
-                    <div className="flex flex-wrap items-center gap-2 justify-between">
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">{m.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Normal: {m.periodNormal} • Férié: {m.periodHoliday} • Total: {m.periodTotal}
+                return (
+                  <details className="rounded-xl border bg-background p-3">
+                    <summary className="cursor-pointer list-none">
+                      <div className="flex flex-wrap items-center gap-2 justify-between">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{m.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Normal: {m.periodNormal} • Férié: {m.periodHoliday} • Total: {m.periodTotal}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{m.periodTotal}</Badge>
+                          <span className="text-xs text-muted-foreground">ouvrir</span>
                         </div>
                       </div>
+                    </summary>
 
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{m.periodTotal}</Badge>
-                        <span className="text-xs text-muted-foreground">ouvrir</span>
-                      </div>
+                    <div className="mt-3 border-t pt-3">
+                      {all.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                          Aucun jour sur la période.
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {all.map((day) => {
+                            const isHoliday = holidaySet.has(day);
+
+                            return (
+                              <StatusBadge
+                                key={day}
+                                tone={isHoliday ? "warning" : "info"}
+                                className="text-xs tabular-nums"
+                              >
+                                {formatFrFromYYYYMMDD(day)}
+                                <span className="text-[10px] opacity-75">
+                                  ({isHoliday ? "Férié" : "Normal"})
+                                </span>
+                              </StatusBadge>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </summary>
-
-                  <div className="mt-3 border-t pt-3">
-                    {all.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
-                        Aucun jour sur la période.
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {all.map((day) => {
-                          const isHoliday = holidaySet.has(day);
-                          const isNormal = normalSet.has(day);
-
-                          return (
-                            <span
-                              key={day}
-                              className={cn(
-                                "px-2 py-1 rounded-md border text-xs tabular-nums",
-                                isHoliday && "bg-orange-50 border-orange-200",
-                                isNormal && "bg-blue-50 border-blue-200"
-                              )}
-                              title={isHoliday ? "Férié" : "Normal"}
-                            >
-                              {formatFrFromYYYYMMDD(day)}{" "}
-                              <span className="text-[10px] text-muted-foreground">
-                                ({isHoliday ? "Férié" : "Normal"})
-                              </span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </details>
-              );
-            })}
+                  </details>
+                );
+              }}
+            />
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
     </div>
   );
 }

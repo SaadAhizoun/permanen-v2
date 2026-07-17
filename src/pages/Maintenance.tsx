@@ -6,8 +6,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
-import { UserCheck, Shield, Trash2, Sparkles, Search, Filter } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { PageHeader, LoadingState, EmptyState, StatusBadge } from '@/components/shared';
+import { AnimatedSection, AnimatedList, AnimatedNumber } from '@/components/motion';
+import { UserCheck, Shield, Trash2, Sparkles, Search, Filter, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
@@ -44,8 +55,26 @@ export default function Maintenance() {
 
   // Roles UX
   const [rolesLoading, setRolesLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [roleSearch, setRoleSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+
+  // Destructive-action confirmation (replaces window.confirm with an on-brand dialog)
+  const [confirmState, setConfirmState] = useState<null | {
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  }>(null);
+
+  const askConfirm = (opts: {
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  }) => setConfirmState((current) => current ?? opts);
 
   useEffect(() => {
     if (isAdmin) fetchData();
@@ -125,33 +154,38 @@ export default function Maintenance() {
       return;
     }
 
-    const confirmMsg =
-      role === 'admin'
-        ? "Confirmer : passer cet utilisateur en ADMIN ?"
-        : "Confirmer : repasser cet utilisateur en USER ?";
+    const doSetRole = async () => {
+      try {
+        setRolesLoading(true);
+        const { error } = await supabase.rpc('admin_set_role', {
+          target_user_id: userId,
+          new_role: role,
+        });
+        if (error) throw error;
 
-    if (!window.confirm(confirmMsg)) return;
+        toast.success(`Rôle modifié → ${role.toUpperCase()}`);
 
-    try {
-      setRolesLoading(true);
-      const { error } = await supabase.rpc('admin_set_role', {
-        target_user_id: userId,
-        new_role: role,
-      });
-      if (error) throw error;
+        // Update local state instantly (no full refetch required)
+        setUserRoles((prev) =>
+          prev.map((r) => (r.user_id === userId ? { ...r, role } : r))
+        );
+      } catch (e: any) {
+        console.error(e);
+        toast.error(e?.message || 'Impossible de modifier le rôle (vérifie que tu es admin)');
+      } finally {
+        setRolesLoading(false);
+      }
+    };
 
-      toast.success(`Rôle modifié → ${role.toUpperCase()}`);
-
-      // Update local state instantly (no full refetch required)
-      setUserRoles((prev) =>
-        prev.map((r) => (r.user_id === userId ? { ...r, role } : r))
-      );
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e?.message || 'Impossible de modifier le rôle (vérifie que tu es admin)');
-    } finally {
-      setRolesLoading(false);
-    }
+    askConfirm({
+      title: role === 'admin' ? 'Passer cet utilisateur en ADMIN ?' : 'Repasser cet utilisateur en USER ?',
+      description:
+        role === 'admin'
+          ? "Cet utilisateur aura accès à toutes les actions d'administration."
+          : "Cet utilisateur perdra l'accès aux actions d'administration.",
+      confirmLabel: 'Confirmer',
+      onConfirm: doSetRole,
+    });
   };
   const deleteUser = async (userId: string) => {
   if (userId === user?.id) {
@@ -159,28 +193,33 @@ export default function Maintenance() {
     return;
   }
 
-  if (!window.confirm("Confirmer la désactivation de cet utilisateur ?")) return;
+  askConfirm({
+    title: 'Désactiver cet utilisateur ?',
+    description: "Il ne pourra plus se connecter à l'application. Cette action peut être annulée manuellement en base si besoin.",
+    confirmLabel: 'Désactiver',
+    destructive: true,
+    onConfirm: async () => {
+      try {
+        setRolesLoading(true);
 
-  try {
-    setRolesLoading(true);
+        const { error } = await supabase
+          .from('profiles')
+          .update({ disabled: true })
+          .eq('user_id', userId);
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ disabled: true })
-      .eq('user_id', userId);
+        if (error) throw error;
 
-    if (error) throw error;
+        toast.success("Utilisateur désactivé.");
 
-    toast.success("Utilisateur désactivé.");
-
-    fetchData();
-
-  } catch (e: any) {
-    console.error(e);
-    toast.error("Erreur lors de la désactivation.");
-  } finally {
-    setRolesLoading(false);
-  }
+        fetchData();
+      } catch (e: any) {
+        console.error(e);
+        toast.error("Erreur lors de la désactivation.");
+      } finally {
+        setRolesLoading(false);
+      }
+    },
+  });
 };
 
 
@@ -192,16 +231,22 @@ export default function Maintenance() {
       return;
     }
 
-    if (!window.confirm(`Confirmer la purge (garder ${purgeDays} jours) ?`)) return;
-
-    try {
-      const { data, error } = await supabase.rpc('purge_audit_log', { keep_days: purgeDays });
-      if (error) throw error;
-      toast.success(`${data} entrées supprimées`);
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e?.message || 'Erreur pendant la purge');
-    }
+    askConfirm({
+      title: `Purger le journal d'audit ?`,
+      description: `Toutes les entrées plus anciennes que ${purgeDays} jours seront définitivement supprimées.`,
+      confirmLabel: 'Purger',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const { data, error } = await supabase.rpc('purge_audit_log', { keep_days: purgeDays });
+          if (error) throw error;
+          toast.success(`${data} entrées supprimées`);
+        } catch (e: any) {
+          console.error(e);
+          toast.error(e?.message || 'Erreur pendant la purge');
+        }
+      },
+    });
   };
 
   const seedHolidays = async () => {
@@ -246,7 +291,7 @@ export default function Maintenance() {
       });
   }, [userRoles, roleFilter, roleSearch]);
 
-  if (loading) return <Skeleton className="h-96 w-full" />;
+  if (loading) return <LoadingState variant="list" rows={3} />;
 
   if (!isAdmin) {
     return (
@@ -264,24 +309,26 @@ export default function Maintenance() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <div className="text-2xl font-bold">Maintenance</div>
-          <div className="text-sm text-muted-foreground">
-            Approbations, rôles, nettoyage et outils admin.
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">En attente: {pendingCount}</Badge>
-          <Badge variant="secondary">Admins: {adminsCount}</Badge>
-          <Badge variant="outline">Vous: ADMIN</Badge>
-        </div>
-      </div>
+      <PageHeader
+        title="Maintenance"
+        description="Approbations, rôles, nettoyage et outils admin."
+        actions={
+          <>
+            <StatusBadge tone={pendingCount > 0 ? 'warning' : 'neutral'}>
+              En attente: <AnimatedNumber value={pendingCount} className="inline" />
+            </StatusBadge>
+            <StatusBadge tone="accent">
+              Admins: <AnimatedNumber value={adminsCount} className="inline" />
+            </StatusBadge>
+            <StatusBadge tone="success">Vous: ADMIN</StatusBadge>
+          </>
+        }
+      />
 
       {/* Pending approvals */}
+      <AnimatedSection>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -292,32 +339,36 @@ export default function Maintenance() {
 
         <CardContent>
           {pendingUsers.length === 0 ? (
-            <p className="text-muted-foreground">{fr.maintenance.noUsers}</p>
+            <EmptyState icon={<UserCheck />} title={fr.maintenance.noUsers} />
           ) : (
             <div className="space-y-2">
-              {pendingUsers.map((u) => (
-                <div
-                  key={u.user_id}
-                  className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 bg-muted rounded-lg"
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{u.full_name}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      Inscrit le {format(new Date(u.created_at), 'dd MMM yyyy', { locale: frLocale })}
+              <AnimatedList
+                items={pendingUsers}
+                getKey={(u) => u.user_id}
+                itemClassName="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 bg-muted rounded-lg"
+                renderItem={(u) => (
+                  <>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{u.full_name}</div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        Inscrit le {format(new Date(u.created_at), 'dd MMM yyyy', { locale: frLocale })}
+                      </div>
                     </div>
-                  </div>
 
-                  <Button size="sm" onClick={() => approveUser(u.user_id)}>
-                    {fr.maintenance.approve}
-                  </Button>
-                </div>
-              ))}
+                    <Button size="sm" onClick={() => approveUser(u.user_id)}>
+                      {fr.maintenance.approve}
+                    </Button>
+                  </>
+                )}
+              />
             </div>
           )}
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Roles management */}
+      <AnimatedSection delay={0.08}>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -379,66 +430,68 @@ export default function Maintenance() {
 
           {/* List */}
           {filteredRoles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucun résultat.</p>
+            <EmptyState icon={<Users />} title="Aucun résultat" description="Aucun utilisateur ne correspond à cette recherche." />
           ) : (
             <div className="space-y-2">
-              {filteredRoles.map((r) => {
-                const name = r.profile?.full_name || 'Utilisateur';
-                const isSelf = r.user_id === user?.id;
+              <AnimatedList
+                items={filteredRoles}
+                getKey={(r) => r.user_id}
+                itemClassName="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg border"
+                layout
+                renderItem={(r) => {
+                  const name = r.profile?.full_name || 'Utilisateur';
+                  const isSelf = r.user_id === user?.id;
 
-                return (
-                  <div
-                    key={r.user_id}
-                    className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg border"
-                  >
-                    <div className="min-w-0">
+                  return (
+                    <>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="font-medium truncate">{name}</div>
+                          <StatusBadge tone={r.role === 'admin' ? 'accent' : 'neutral'}>
+                            {r.role.toUpperCase()}
+                          </StatusBadge>
+                          {isSelf && (
+                            <StatusBadge tone="info">Vous</StatusBadge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          ID: {r.user_id}
+                        </div>
+                      </div>
+
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="font-medium truncate">{name}</div>
-                        <Badge variant={r.role === 'admin' ? 'default' : 'secondary'}>
-                          {r.role.toUpperCase()}
-                        </Badge>
-                        {isSelf && (
-                          <Badge variant="outline">Vous</Badge>
+                        {r.role === 'admin' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={rolesLoading || isSelf}
+                            onClick={() => setRole(r.user_id, 'user')}
+                            title={isSelf ? "Tu ne peux pas retirer ton propre rôle admin." : ''}
+                          >
+                            Passer USER
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={rolesLoading}
+                            onClick={() => setRole(r.user_id, 'admin')}
+                          >
+                            Passer ADMIN
+                          </Button>
                         )}
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        ID: {r.user_id}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {r.role === 'admin' ? (
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant="destructive"
                           disabled={rolesLoading || isSelf}
-                          onClick={() => setRole(r.user_id, 'user')}
-                          title={isSelf ? "Tu ne peux pas retirer ton propre rôle admin." : ''}
+                          onClick={() => deleteUser(r.user_id)}
                         >
-                          Passer USER
+                          Supprimer
                         </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled={rolesLoading}
-                          onClick={() => setRole(r.user_id, 'admin')}
-                        >
-                          Passer ADMIN
-                        </Button>
-                      )}
-                      <Button
-  size="sm"
-  variant="destructive"
-  disabled={rolesLoading || isSelf}
-  onClick={() => deleteUser(r.user_id)}
->
-  Supprimer
-</Button>
-
-                    </div>
-                  </div>
-                );
-              })}
+                      </div>
+                    </>
+                  );
+                }}
+              />
             </div>
           )}
 
@@ -447,8 +500,10 @@ export default function Maintenance() {
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Cleanup */}
+      <AnimatedSection delay={0.16}>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -476,8 +531,10 @@ export default function Maintenance() {
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Seed holidays */}
+      <AnimatedSection delay={0.24}>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -502,6 +559,43 @@ export default function Maintenance() {
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
+
+      <AlertDialog
+        open={!!confirmState}
+        onOpenChange={(open) => {
+          if (!open && !confirming) setConfirmState(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmState?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmState?.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirming}>{fr.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              className={confirmState?.destructive ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : undefined}
+              disabled={confirming}
+              onClick={async (event) => {
+                event.preventDefault();
+                const action = confirmState?.onConfirm;
+                if (!action || confirming) return;
+
+                setConfirming(true);
+                try {
+                  await action();
+                } finally {
+                  setConfirming(false);
+                  setConfirmState(null);
+                }
+              }}
+            >
+              {confirming ? 'Traitement…' : (confirmState?.confirmLabel || fr.common.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

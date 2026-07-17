@@ -3,7 +3,7 @@ import { Settings as SettingsIcon } from 'lucide-react';
 
 export default function Settings() {
   return (
-    <div className="max-w-2xl mx-auto animate-fade-in">
+    <div className="max-w-2xl mx-auto">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

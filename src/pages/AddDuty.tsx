@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as m from 'motion/react-m';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { fr } from '@/lib/i18n';
@@ -18,6 +19,8 @@ import { format } from 'date-fns';
 import { fr as frLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { StaggerContainer, StaggerItem, AnimatedPresencePanel } from '@/components/motion';
+import { shakeAnimation } from '@/lib/motion';
 
 interface TeamMember {
   id: string;
@@ -35,20 +38,6 @@ interface Holiday {
 export default function AddDuty() {
   const navigate = useNavigate();
   const { isAdmin, user } = useAuthContext();
-  if (!isAdmin) {
-  return (
-    <div className="max-w-3xl mx-auto">
-      <Alert>
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Accès refusé</AlertTitle>
-        <AlertDescription>
-          Cette action est réservée aux administrateurs.
-        </AlertDescription>
-      </Alert>
-    </div>
-  );
-}
-
   const [loading, setLoading] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -61,6 +50,7 @@ export default function AddDuty() {
 
   const [holidayWarning, setHolidayWarning] = useState<Holiday | null>(null);
   const [duplicateError, setDuplicateError] = useState(false);
+  const [shakeTrigger, setShakeTrigger] = useState(false);
 
   // NEW: mode Jour/Semaine/Mois
 type AddMode = 'day' | 'week' | 'month';
@@ -80,11 +70,13 @@ const [loadingRecs, setLoadingRecs] = useState(false);
 
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchTeamMembers();
     fetchHolidays();
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
+  if (!isAdmin) return;
   if (dutyDate) {
     checkHoliday(dutyDate);
 
@@ -98,7 +90,21 @@ const [loadingRecs, setLoadingRecs] = useState(false);
     refreshRecommendations();
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [dutyDate, selectedMember, mode, peoplePerDay, includeWeekends, excludeHolidays, selectedWeekdays, teamMembers.length, holidays.length]);
+}, [isAdmin, dutyDate, selectedMember, mode, peoplePerDay, includeWeekends, excludeHolidays, selectedWeekdays, teamMembers.length, holidays.length]);
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Accès refusé</AlertTitle>
+          <AlertDescription>
+            Cette action est réservée aux administrateurs.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
 
   const fetchTeamMembers = async () => {
@@ -261,11 +267,13 @@ setRecommendedMemberIds(sorted.slice(0, needed));
 
   if (!dutyDate) {
     toast.error('Veuillez sélectionner une date');
+    setShakeTrigger(true);
     return;
   }
 
   if (mode === 'day' && !selectedMember) {
     toast.error('Veuillez sélectionner un membre');
+    setShakeTrigger(true);
     return;
   }
 
@@ -273,10 +281,12 @@ setRecommendedMemberIds(sorted.slice(0, needed));
     // existing single insert logic
     if (duplicateError) {
       toast.error(fr.duty.duplicateError);
+      setShakeTrigger(true);
       return;
     }
     if (holidayWarning && !isAdmin && !holidayOverride) {
       toast.error("Impossible d'assigner une permanence sur un jour férié");
+      setShakeTrigger(true);
       return;
     }
   }
@@ -413,7 +423,11 @@ for (const d of dates) {
   const dutyTypes = ['Day', 'Night', 'Weekend', 'Other'];
 
   return (
-    <div className="max-w-2xl mx-auto animate-fade-in">
+    <div className="max-w-2xl mx-auto">
+      <m.div
+        animate={shakeTrigger ? shakeAnimation : undefined}
+        onAnimationComplete={() => setShakeTrigger(false)}
+      >
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -422,8 +436,10 @@ for (const d of dates) {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          <StaggerContainer className="space-y-6">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Mode */}
+<StaggerItem>
 <div className="space-y-2">
   <Label>Mode d’ajout *</Label>
   <Select value={mode} onValueChange={(v) => setMode(v as any)}>
@@ -437,9 +453,11 @@ for (const d of dates) {
     </SelectContent>
   </Select>
 </div>
+</StaggerItem>
 
 {/* Week/Month options */}
 {mode !== 'day' && (
+  <StaggerItem>
   <div className="space-y-4 rounded-lg border p-4">
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">
@@ -531,9 +549,11 @@ for (const d of dates) {
       </div>
     )}
   </div>
+  </StaggerItem>
 )}
 
             {/* Date Picker */}
+            <StaggerItem>
             <div className="space-y-2">
               <Label>{fr.duty.date} *</Label>
               <Popover>
@@ -561,8 +581,10 @@ for (const d of dates) {
                 </PopoverContent>
               </Popover>
             </div>
+            </StaggerItem>
 
             {/* Holiday Warning */}
+            <AnimatedPresencePanel show={!!holidayWarning}>
             {holidayWarning && (
               <Alert variant="destructive" className="bg-warning/10 border-warning text-warning-foreground">
                 <AlertTriangle className="h-4 w-4" />
@@ -584,8 +606,10 @@ for (const d of dates) {
                 </AlertDescription>
               </Alert>
             )}
+            </AnimatedPresencePanel>
 
             {/* Duplicate Error */}
+            <AnimatedPresencePanel show={duplicateError}>
             {duplicateError && (
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
@@ -593,8 +617,10 @@ for (const d of dates) {
                 <AlertDescription>{fr.duty.duplicateError}</AlertDescription>
               </Alert>
             )}
+            </AnimatedPresencePanel>
 
             {/* Duty Type */}
+            <StaggerItem>
             <div className="space-y-2">
               <Label>{fr.duty.type}</Label>
               <Select value={dutyType} onValueChange={setDutyType}>
@@ -610,8 +636,10 @@ for (const d of dates) {
                 </SelectContent>
               </Select>
             </div>
+            </StaggerItem>
 
             {/* Team Member */}
+            <StaggerItem>
             <div className="space-y-2">
               <Label>{fr.duty.member} *</Label>
               <Select value={selectedMember} onValueChange={setSelectedMember}>
@@ -628,8 +656,10 @@ for (const d of dates) {
                 </SelectContent>
               </Select>
             </div>
+            </StaggerItem>
 
             {/* Notes */}
+            <StaggerItem>
             <div className="space-y-2">
               <Label>{fr.duty.notes}</Label>
               <Textarea
@@ -639,8 +669,10 @@ for (const d of dates) {
                 rows={3}
               />
             </div>
+            </StaggerItem>
 
             {/* Submit */}
+            <StaggerItem>
             <div className="flex gap-3 pt-4">
               <Button
                 type="submit"
@@ -658,9 +690,12 @@ for (const d of dates) {
                 {fr.common.cancel}
               </Button>
             </div>
+            </StaggerItem>
           </form>
+          </StaggerContainer>
         </CardContent>
       </Card>
+      </m.div>
     </div>
   );
 }

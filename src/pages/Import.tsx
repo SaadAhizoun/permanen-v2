@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react';
+import * as m from 'motion/react-m';
+import { AnimatePresence } from 'motion/react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { fr } from '@/lib/i18n';
@@ -13,6 +15,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Upload, FileSpreadsheet, Check, X, AlertTriangle, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import {
+  StaggerContainer,
+  StaggerItem,
+  AnimatedSection,
+  AnimatedList,
+  AnimatedNumber,
+} from '@/components/motion';
+import { premiumEase } from '@/lib/motion';
 
 interface ParsedRow {
   date: string;
@@ -31,20 +41,6 @@ interface ImportResult {
 
 export default function Import() {
   const { user, isAdmin } = useAuthContext();
-  if (!isAdmin) {
-  return (
-    <div className="max-w-3xl mx-auto">
-      <Alert>
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Accès refusé</AlertTitle>
-        <AlertDescription>
-          L’import est réservé aux administrateurs.
-        </AlertDescription>
-      </Alert>
-    </div>
-  );
-}
-
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<any[]>([]);
@@ -137,6 +133,20 @@ setRows(dataRows);
       setLoading(false);
     }
   }, []);
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Accès refusé</AlertTitle>
+          <AlertDescription>
+            L’import est réservé aux administrateurs.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
   const applyPreset = (preset: 'coordination') => {
     if (preset === 'coordination') {
@@ -402,7 +412,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
   };
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Upload Section */}
       <Card>
         <CardHeader>
@@ -423,18 +433,28 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
               disabled={loading}
               className="max-w-md"
             />
-            {file && (
-              <Badge variant="secondary">
-                <FileSpreadsheet className="h-4 w-4 mr-1" />
-                {file.name}
-              </Badge>
-            )}
+            <AnimatePresence>
+              {file && (
+                <m.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.2, ease: premiumEase }}
+                >
+                  <Badge variant="secondary">
+                    <FileSpreadsheet className="h-4 w-4 mr-1" />
+                    {file.name}
+                  </Badge>
+                </m.div>
+              )}
+            </AnimatePresence>
           </div>
         </CardContent>
       </Card>
 
       {/* Mapping Section */}
       {headers.length > 0 && (
+        <AnimatedSection>
         <Card>
           <CardHeader>
             <CardTitle>{fr.import.mapping}</CardTitle>
@@ -445,7 +465,8 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <StaggerItem>
               <div className="space-y-2">
                 <Label>{fr.import.dateColumn} *</Label>
                 <Select value={dateColumn} onValueChange={setDateColumn}>
@@ -459,7 +480,9 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </SelectContent>
                 </Select>
               </div>
+              </StaggerItem>
 
+              <StaggerItem>
               <div className="space-y-2">
                 <Label>{fr.import.memberColumn} *</Label>
                 <Select value={memberColumn} onValueChange={setMemberColumn}>
@@ -473,7 +496,9 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </SelectContent>
                 </Select>
               </div>
+              </StaggerItem>
 
+              <StaggerItem>
               <div className="space-y-2">
                 <Label>{fr.import.typeColumn}</Label>
                 <Select value={typeColumn} onValueChange={setTypeColumn}>
@@ -489,7 +514,9 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </SelectContent>
                 </Select>
               </div>
+              </StaggerItem>
 
+              <StaggerItem>
               <div className="space-y-2">
                 <Label>{fr.import.gradeColumn}</Label>
                 <Select value={gradeColumn} onValueChange={setGradeColumn}>
@@ -504,7 +531,8 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </SelectContent>
                 </Select>
               </div>
-            </div>
+              </StaggerItem>
+            </StaggerContainer>
 
             {/* Options */}
             <div className="border-t pt-4 space-y-3">
@@ -534,13 +562,19 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="border-t">
-                        {headers.map((_, j) => (
-                          <td key={j} className="p-2">{formatCellForPreview(row[j], headers[j])}</td>
-                        ))}
-                      </tr>
-                    ))}
+                    <AnimatedList
+                      items={rows.slice(0, 5)}
+                      getKey={(_row, i) => String(i)}
+                      as="tr"
+                      itemClassName="border-t"
+                      renderItem={(row) => (
+                        <>
+                          {headers.map((_, j) => (
+                            <td key={j} className="p-2">{formatCellForPreview(row[j], headers[j])}</td>
+                          ))}
+                        </>
+                      )}
+                    />
                   </tbody>
                 </table>
               </div>
@@ -552,32 +586,46 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             </Button>
           </CardContent>
         </Card>
+        </AnimatedSection>
       )}
 
       {/* Results */}
       {result && (
+        <AnimatedSection>
         <Card>
           <CardHeader>
             <CardTitle>{fr.import.results}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-success/10 rounded-lg">
-                <Check className="h-8 w-8 mx-auto text-success mb-2" />
-                <div className="text-2xl font-bold text-success">{result.inserted}</div>
-                <div className="text-sm text-muted-foreground">{fr.import.inserted}</div>
+            <StaggerContainer className="grid grid-cols-3 gap-3 sm:gap-4">
+              <StaggerItem>
+              <div className="text-center p-3 sm:p-4 bg-success/10 rounded-lg">
+                <Check className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-success mb-2" />
+                <div className="text-xl sm:text-2xl font-bold text-success">
+                  <AnimatedNumber value={result.inserted} />
+                </div>
+                <div className="text-xs sm:text-sm text-muted-foreground">{fr.import.inserted}</div>
               </div>
-              <div className="text-center p-4 bg-muted rounded-lg">
-                <X className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <div className="text-2xl font-bold">{result.skipped}</div>
-                <div className="text-sm text-muted-foreground">{fr.import.skipped}</div>
+              </StaggerItem>
+              <StaggerItem>
+              <div className="text-center p-3 sm:p-4 bg-muted rounded-lg">
+                <X className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-muted-foreground mb-2" />
+                <div className="text-xl sm:text-2xl font-bold">
+                  <AnimatedNumber value={result.skipped} />
+                </div>
+                <div className="text-xs sm:text-sm text-muted-foreground">{fr.import.skipped}</div>
               </div>
-              <div className="text-center p-4 bg-destructive/10 rounded-lg">
-                <AlertTriangle className="h-8 w-8 mx-auto text-destructive mb-2" />
-                <div className="text-2xl font-bold text-destructive">{result.errors.length}</div>
-                <div className="text-sm text-muted-foreground">{fr.import.errors}</div>
+              </StaggerItem>
+              <StaggerItem>
+              <div className="text-center p-3 sm:p-4 bg-destructive/10 rounded-lg">
+                <AlertTriangle className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-destructive mb-2" />
+                <div className="text-xl sm:text-2xl font-bold text-destructive">
+                  <AnimatedNumber value={result.errors.length} />
+                </div>
+                <div className="text-xs sm:text-sm text-muted-foreground">{fr.import.errors}</div>
               </div>
-            </div>
+              </StaggerItem>
+            </StaggerContainer>
 
             {result.errors.length > 0 && (
               <div className="space-y-2">
@@ -598,13 +646,19 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                       </tr>
                     </thead>
                     <tbody>
-                      {result.errors.map((err, i) => (
-                        <tr key={i} className="border-t">
-                          <td className="p-2">{err.date}</td>
-                          <td className="p-2">{err.memberName}</td>
-                          <td className="p-2 text-destructive">{err.error}</td>
-                        </tr>
-                      ))}
+                      <AnimatedList
+                        items={result.errors}
+                        getKey={(_err, i) => String(i)}
+                        as="tr"
+                        itemClassName="border-t"
+                        renderItem={(err) => (
+                          <>
+                            <td className="p-2">{err.date}</td>
+                            <td className="p-2">{err.memberName}</td>
+                            <td className="p-2 text-destructive">{err.error}</td>
+                          </>
+                        )}
+                      />
                     </tbody>
                   </table>
                 </div>
@@ -612,6 +666,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             )}
           </CardContent>
         </Card>
+        </AnimatedSection>
       )}
     </div>
   );

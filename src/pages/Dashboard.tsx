@@ -6,8 +6,9 @@ import { fr } from '@/lib/i18n';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from "sonner";
+import { PageHeader, StatCard, EmptyState, LoadingState } from '@/components/shared';
+import { StaggerContainer, AnimatedSection, AnimatedNumber, AnimatedList } from '@/components/motion';
 import {
   Table,
   TableBody,
@@ -191,140 +192,76 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}>
-              <CardHeader className="pb-2">
-                <Skeleton className="h-4 w-24" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-16" />
-                <Skeleton className="h-4 w-32 mt-2" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <PageHeader title="Bienvenue" description="Chargement du tableau de bord…" />
+        <LoadingState variant="cards" rows={4} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-            {/* Welcome */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">
-            Bienvenue{myName ? `, ${myName}` : ''}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {isAdmin ? 'Accès administrateur' : 'Accès utilisateur'}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={`Bienvenue${myName ? `, ${myName}` : ''}`}
+        description={isAdmin ? 'Accès administrateur' : 'Accès utilisateur'}
+      />
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Next Duty */}
-        <Card className="kpi-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {fr.dashboard.nextDuty}
-            </CardTitle>
-            <Calendar className="h-4 w-4 text-accent" />
-          </CardHeader>
-          <CardContent>
-            {kpis.nextDuty ? (
-              <>
-                <div className="text-2xl font-bold">
-                  {format(new Date(kpis.nextDuty.duty_date), 'd MMM', { locale: frLocale })}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {kpis.nextDuty.team_member?.full_name || 'Non assigné'}
-                </p>
-              </>
-            ) : (
-              <div className="text-2xl font-bold text-muted-foreground">—</div>
-            )}
-          </CardContent>
-        </Card>
+      <StaggerContainer className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label={fr.dashboard.nextDuty}
+          icon={<Calendar />}
+          value={
+            kpis.nextDuty
+              ? format(new Date(kpis.nextDuty.duty_date), 'd MMM', { locale: frLocale })
+              : '—'
+          }
+          valueClassName={!kpis.nextDuty ? 'text-muted-foreground' : undefined}
+          secondary={kpis.nextDuty ? (kpis.nextDuty.team_member?.full_name || 'Non assigné') : undefined}
+        />
 
-        {/* Month Total */}
-        <Card className="kpi-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {fr.dashboard.totalDuties}
-            </CardTitle>
-            <Users className="h-4 w-4 text-accent" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{kpis.monthTotal}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {format(new Date(), 'MMMM yyyy', { locale: frLocale })}
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard
+          label={fr.dashboard.totalDuties}
+          icon={<Users />}
+          value={<AnimatedNumber value={kpis.monthTotal} />}
+          secondary={format(new Date(), 'MMMM yyyy', { locale: frLocale })}
+        />
 
-        {/* Fairness Score */}
-        <Card className="kpi-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {fr.dashboard.fairness}
-            </CardTitle>
-            <BarChart3 className="h-4 w-4 text-accent" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${getFairnessColor(kpis.fairnessScore)}`}>
-              {kpis.fairnessScore}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {getFairnessLabel(kpis.fairnessScore)}
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard
+          label={fr.dashboard.fairness}
+          icon={<BarChart3 />}
+          value={<AnimatedNumber value={kpis.fairnessScore} format={(v) => `${Math.round(v)}%`} />}
+          valueClassName={getFairnessColor(kpis.fairnessScore)}
+          secondary={getFairnessLabel(kpis.fairnessScore)}
+        />
 
-        {/* Conflicts / Pending Approvals */}
         {isAdmin ? (
-          <Card className="kpi-card">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {fr.dashboard.pendingApprovals}
-              </CardTitle>
-              <UserCheck className="h-4 w-4 text-accent" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {kpis.pendingApprovals}
-              </div>
-              {kpis.pendingApprovals > 0 && (
+          <StatCard
+            label={fr.dashboard.pendingApprovals}
+            icon={<UserCheck />}
+            value={<AnimatedNumber value={kpis.pendingApprovals} />}
+            secondary={
+              kpis.pendingApprovals > 0 ? (
                 <Link to="/maintenance">
-                  <Button variant="link" className="p-0 h-auto text-xs text-accent mt-1">
+                  <Button variant="link" className="p-0 h-auto text-xs text-accent">
                     Voir les demandes <ArrowRight className="ml-1 h-3 w-3" />
                   </Button>
                 </Link>
-              )}
-            </CardContent>
-          </Card>
+              ) : undefined
+            }
+          />
         ) : (
-          <Card className="kpi-card">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {fr.dashboard.conflicts}
-              </CardTitle>
-              <AlertTriangle className="h-4 w-4 text-accent" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-success">
-                {kpis.conflicts === 0 ? '0' : kpis.conflicts}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {kpis.conflicts === 0 ? fr.dashboard.noConflicts : 'À résoudre'}
-              </p>
-            </CardContent>
-          </Card>
+          <StatCard
+            label={fr.dashboard.conflicts}
+            icon={<AlertTriangle />}
+            value={<AnimatedNumber value={kpis.conflicts} />}
+            valueClassName="text-success"
+            secondary={kpis.conflicts === 0 ? fr.dashboard.noConflicts : 'À résoudre'}
+          />
         )}
-      </div>
+      </StaggerContainer>
 
       {/* Quick Actions */}
+      <AnimatedSection delay={0.1}>
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">{fr.dashboard.quickActions}</CardTitle>
@@ -387,8 +324,10 @@ export default function Dashboard() {
 </CardContent>
 
       </Card>
+      </AnimatedSection>
 
       {/* Upcoming Duties Table */}
+      <AnimatedSection delay={0.16}>
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">{fr.dashboard.upcomingDuties}</CardTitle>
@@ -398,27 +337,27 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           {upcomingDuties.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
-              <p>{fr.dashboard.noDuties}</p>
-              {isAdmin ? (
-  <Link to="/add-duty">
-    <Button variant="link" className="mt-2">
-      Ajouter une permanence
-    </Button>
-  </Link>
-) : (
-  <Button
-    variant="link"
-    className="mt-2 opacity-60 cursor-not-allowed"
-    onClick={() => toast.error('Action réservée aux administrateurs')}
-    title="Réservé aux administrateurs"
-  >
-    Ajouter une permanence
-  </Button>
-)}
-
-            </div>
+            <EmptyState
+              icon={<Calendar />}
+              title={fr.dashboard.noDuties}
+              action={
+                isAdmin ? (
+                  <Link to="/add-duty">
+                    <Button variant="outline" size="sm">Ajouter une permanence</Button>
+                  </Link>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="opacity-60 cursor-not-allowed"
+                    onClick={() => toast.error('Action réservée aux administrateurs')}
+                    title="Réservé aux administrateurs"
+                  >
+                    Ajouter une permanence
+                  </Button>
+                )
+              }
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -430,40 +369,47 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {upcomingDuties.slice(0, 10).map((duty) => (
-                  <TableRow key={duty.id} className="data-table-row">
-                    <TableCell className="font-medium">
-                      {format(new Date(duty.duty_date), 'EEE d MMM', { locale: frLocale })}
-                    </TableCell>
-                    <TableCell>
-                      {duty.team_member ? (
-                        <div>
-                          <span>{duty.team_member.full_name}</span>
-                          {duty.team_member.title && (
-                            <span className="text-muted-foreground text-xs ml-2">
-                              ({duty.team_member.title})
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">Non assigné</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {fr.duty.types[duty.duty_type as keyof typeof fr.duty.types] || duty.duty_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-muted-foreground">
-                      {duty.notes || '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                <AnimatedList
+                  as="tr"
+                  items={upcomingDuties.slice(0, 10)}
+                  getKey={(duty) => duty.id}
+                  itemClassName="data-table-row"
+                  renderItem={(duty) => (
+                    <>
+                      <TableCell className="font-medium">
+                        {format(new Date(duty.duty_date), 'EEE d MMM', { locale: frLocale })}
+                      </TableCell>
+                      <TableCell>
+                        {duty.team_member ? (
+                          <div>
+                            <span>{duty.team_member.full_name}</span>
+                            {duty.team_member.title && (
+                              <span className="text-muted-foreground text-xs ml-2">
+                                ({duty.team_member.title})
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">Non assigné</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {fr.duty.types[duty.duty_type as keyof typeof fr.duty.types] || duty.duty_type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell text-muted-foreground">
+                        {duty.notes || '—'}
+                      </TableCell>
+                    </>
+                  )}
+                />
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
+      </AnimatedSection>
     </div>
   );
 }
