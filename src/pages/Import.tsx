@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Upload, FileSpreadsheet, Check, X, AlertTriangle, Download } from 'lucide-react';
+import { PageHeader, EmptyState } from '@/components/shared';
+import { Upload, FileSpreadsheet, Check, X, AlertTriangle, Download, Table2, ListChecks } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import {
@@ -413,26 +414,49 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
+      <PageHeader
+        eyebrow="Administration"
+        title={fr.import.title}
+        description="Importez vos permanences depuis un fichier Excel ou CSV."
+        icon={<Upload />}
+        accent="primary"
+      />
+
       {/* Upload Section */}
+      <AnimatedSection>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Upload className="h-5 w-5" />
-            {fr.import.title}
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FileSpreadsheet className="h-4.5 w-4.5" />
+            </span>
+            Fichier source
           </CardTitle>
           <CardDescription>
-            Importez vos permanences depuis un fichier Excel ou CSV
+            Formats acceptés : .xlsx, .xls, .csv
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-4">
+          <label
+            htmlFor="import-file-input"
+            className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/30 px-6 py-8 text-center transition-colors duration-component ease-standard hover:border-primary/40 hover:bg-primary/[0.03] cursor-pointer"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Upload className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium">Cliquez pour choisir un fichier</span>
+            <span className="text-xs text-muted-foreground">Formats acceptés : .xlsx, .xls, .csv</span>
             <Input
+              id="import-file-input"
               type="file"
               accept=".xlsx,.xls,.csv"
               onChange={handleFileUpload}
               disabled={loading}
-              className="max-w-md"
+              className="sr-only"
             />
+          </label>
+
+          <div className="flex items-center gap-4">
             <AnimatePresence>
               {file && (
                 <m.div
@@ -451,13 +475,19 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
           </div>
         </CardContent>
       </Card>
+      </AnimatedSection>
 
       {/* Mapping Section */}
       {headers.length > 0 && (
-        <AnimatedSection>
+        <AnimatedSection delay={0.06}>
         <Card>
           <CardHeader>
-            <CardTitle>{fr.import.mapping}</CardTitle>
+            <CardTitle className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-info/10 text-info">
+                <Table2 className="h-4.5 w-4.5" />
+              </span>
+              {fr.import.mapping}
+            </CardTitle>
             <div className="flex gap-2 mt-2">
               <Button variant="outline" size="sm" onClick={() => applyPreset('coordination')}>
                 {fr.import.coordinationPreset}
@@ -535,8 +565,8 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             </StaggerContainer>
 
             {/* Options */}
-            <div className="border-t pt-4 space-y-3">
-              <h4 className="font-medium">{fr.import.options}</h4>
+            <div className="space-y-3 rounded-lg border bg-accent/[0.03] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-accent">{fr.import.options}</p>
               <div className="flex flex-col gap-3">
                 <div className="flex items-center gap-2">
                   <Checkbox id="create-members" checked={createMembers} onCheckedChange={(c) => setCreateMembers(c as boolean)} />
@@ -551,8 +581,11 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
 
             {/* Preview */}
             <div className="border-t pt-4">
-              <h4 className="font-medium mb-2">{fr.import.preview} ({rows.length} lignes)</h4>
-              <div className="max-h-40 overflow-auto border rounded">
+              <h4 className="font-medium mb-2 flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-muted-foreground" />
+                {fr.import.preview} ({rows.length} lignes)
+              </h4>
+              <div className="max-h-40 overflow-auto rounded-lg border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted sticky top-0">
                     <tr>
@@ -594,12 +627,17 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
         <AnimatedSection>
         <Card>
           <CardHeader>
-            <CardTitle>{fr.import.results}</CardTitle>
+            <CardTitle className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-success/10 text-success">
+                <Check className="h-4.5 w-4.5" />
+              </span>
+              {fr.import.results}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <StaggerContainer className="grid grid-cols-3 gap-3 sm:gap-4">
               <StaggerItem>
-              <div className="text-center p-3 sm:p-4 bg-success/10 rounded-lg">
+              <div className="text-center p-3 sm:p-4 rounded-xl border bg-success/10 border-success/20">
                 <Check className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-success mb-2" />
                 <div className="text-xl sm:text-2xl font-bold text-success">
                   <AnimatedNumber value={result.inserted} />
@@ -608,16 +646,16 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
               </div>
               </StaggerItem>
               <StaggerItem>
-              <div className="text-center p-3 sm:p-4 bg-muted rounded-lg">
-                <X className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-muted-foreground mb-2" />
-                <div className="text-xl sm:text-2xl font-bold">
+              <div className="text-center p-3 sm:p-4 rounded-xl border bg-warning/10 border-warning/20">
+                <X className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-warning mb-2" />
+                <div className="text-xl sm:text-2xl font-bold text-warning">
                   <AnimatedNumber value={result.skipped} />
                 </div>
                 <div className="text-xs sm:text-sm text-muted-foreground">{fr.import.skipped}</div>
               </div>
               </StaggerItem>
               <StaggerItem>
-              <div className="text-center p-3 sm:p-4 bg-destructive/10 rounded-lg">
+              <div className="text-center p-3 sm:p-4 rounded-xl border bg-destructive/10 border-destructive/20">
                 <AlertTriangle className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-destructive mb-2" />
                 <div className="text-xl sm:text-2xl font-bold text-destructive">
                   <AnimatedNumber value={result.errors.length} />
@@ -627,7 +665,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
               </StaggerItem>
             </StaggerContainer>
 
-            {result.errors.length > 0 && (
+            {result.errors.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium">Détail des erreurs</h4>
@@ -636,7 +674,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                     {fr.import.downloadErrors}
                   </Button>
                 </div>
-                <div className="max-h-40 overflow-auto border rounded">
+                <div className="max-h-40 overflow-auto rounded-lg border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted sticky top-0">
                       <tr>
@@ -663,6 +701,12 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </table>
                 </div>
               </div>
+            ) : (
+              <EmptyState
+                icon={<Check />}
+                title="Aucune erreur"
+                description="Toutes les lignes ont été traitées sans problème."
+              />
             )}
           </CardContent>
         </Card>

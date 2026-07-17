@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as m from 'motion/react-m';
-import { useReducedMotion } from 'motion/react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,8 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { fr } from '@/lib/i18n';
-import { Calendar, Users, Shield } from 'lucide-react';
+import { Calendar, Users, ShieldCheck } from 'lucide-react';
 import { StaggerContainer, StaggerItem } from '@/components/motion';
+import { AppBackground } from '@/components/shared';
 import { premiumEase } from '@/lib/motion';
 
 export default function Auth() {
@@ -63,31 +63,9 @@ export default function Auth() {
     }
   };
 
-  const shouldReduceMotion = useReducedMotion();
-
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
-      {/* Subtle animated background shapes — decorative only, disabled under reduced motion */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <m.div
-          className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl"
-          animate={
-            shouldReduceMotion
-              ? undefined
-              : { x: [0, 24, 0], y: [0, 16, 0] }
-          }
-          transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <m.div
-          className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-accent/10 blur-3xl"
-          animate={
-            shouldReduceMotion
-              ? undefined
-              : { x: [0, -20, 0], y: [0, -20, 0] }
-          }
-          transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      </div>
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden p-4">
+      <AppBackground variant="auth" />
 
       <StaggerContainer className="relative w-full max-w-md space-y-8">
         {/* Logo and Title */}
@@ -97,7 +75,8 @@ export default function Auth() {
               initial={{ scale: 0.85, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.32, ease: premiumEase }}
-              className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary text-primary-foreground shadow-lg"
+              className="relative inline-flex items-center justify-center w-16 h-16 rounded-2xl text-primary-foreground shadow-lg shadow-primary/25"
+              style={{ background: 'var(--gradient-primary)' }}
             >
               <Calendar className="w-8 h-8" />
             </m.div>
@@ -116,15 +95,21 @@ export default function Auth() {
         <StaggerItem>
           <div className="flex justify-center gap-6 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-accent" />
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-info/10 text-info">
+                <Users className="w-3.5 h-3.5" />
+              </span>
               <span>Équipe</span>
             </div>
             <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-accent" />
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/10 text-accent">
+                <Calendar className="w-3.5 h-3.5" />
+              </span>
               <span>Planning</span>
             </div>
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-accent" />
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-success/10 text-success">
+                <ShieldCheck className="w-3.5 h-3.5" />
+              </span>
               <span>Sécurisé</span>
             </div>
           </div>
@@ -132,7 +117,7 @@ export default function Auth() {
 
         {/* Auth Card */}
         <StaggerItem>
-          <Card className="shadow-xl border-0 bg-card/80 backdrop-blur-sm">
+          <Card className="shadow-xl shadow-primary/5 border-border/60 bg-card/85 backdrop-blur-sm">
             <CardHeader className="text-center pb-4">
               <CardTitle>Bienvenue</CardTitle>
               <CardDescription>Connectez-vous ou créez un compte</CardDescription>

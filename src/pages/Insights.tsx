@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { premiumEase } from "@/lib/motion";
+import { chartGlobal, chartHoliday, chartNormal, rankAccent } from "@/lib/chartColors";
 import {
   StaggerContainer,
   StaggerItem,
@@ -17,7 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LoadingState, StatusBadge } from "@/components/shared";
+import { LoadingState, PageHeader, StatusBadge } from "@/components/shared";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   Select,
@@ -45,7 +47,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { Download, FileSpreadsheet, FileText } from "lucide-react";
+import { Download, FileSpreadsheet, FileText, Sparkles } from "lucide-react";
 
 import {
   BarChart,
@@ -56,6 +58,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
   LabelList,
+  Cell,
 } from "recharts";
 
 import {
@@ -215,6 +218,17 @@ function headerCell(title: string, subtitle?: string) {
 // ---------- Responsive helpers ----------
 const CHART_MOBILE_LIMIT = 10;
 
+const chartTooltipStyle = {
+  backgroundColor: "hsl(var(--popover))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: 10,
+  fontSize: 12,
+  color: "hsl(var(--popover-foreground))",
+  boxShadow: "var(--shadow-md)",
+};
+
+const chartTooltipCursor = { fill: "hsl(var(--muted))", opacity: 0.4 };
+
 function limitForMobile<T>(
   arr: T[],
   isMobile: boolean,
@@ -264,10 +278,10 @@ function KpiCard({
   hint?: string;
 }) {
   return (
-    <Card>
+    <Card className="overflow-hidden border-border/70 bg-gradient-to-b from-card to-card/70">
       <CardContent className="py-4 md:py-5">
-        <div className="text-sm text-muted-foreground">{label}</div>
-        <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="text-2xl md:text-3xl font-bold tracking-tight mt-1.5 tabular-nums">
           {value}
         </div>
         {hint ? <div className="text-xs text-muted-foreground mt-1">{hint}</div> : null}
@@ -441,6 +455,7 @@ export default function Insights() {
     ? { duration: 0.01 }
     : { duration: 0.24, ease: premiumEase };
   const [showAllChartsMobile, setShowAllChartsMobile] = useState(false);
+  const [fullRankingOpen, setFullRankingOpen] = useState(false);
 
   const chartXAxisProps = getChartXAxisProps(isMobile);
 
@@ -1594,8 +1609,8 @@ export default function Insights() {
 
   // ---------- chart data with mobile limit ----------
   const distributionDataForChart = useMemo(
-    () => limitForMobile(distributionData, isMobile, showAllChartsMobile),
-    [distributionData, isMobile, showAllChartsMobile]
+    () => distributionData.slice(0, CHART_MOBILE_LIMIT),
+    [distributionData]
   );
 
   const normalChartDataForChart = useMemo(
@@ -1638,39 +1653,29 @@ export default function Insights() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      <PageHeader
+        eyebrow="Pilotage"
+        title="Aide à la décision"
+        description="Lecture rapide, filtres et indicateurs pour suivre la répartition des permanences."
+        icon={<Sparkles />}
+        accent="priority"
+      />
+
       <AnimatedSection
         delay={0}
-        className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between"
+        className="flex flex-col gap-3 rounded-xl border bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between"
       >
-        <div className="space-y-1">
-          <div className="text-xl md:text-2xl font-semibold tracking-tight">Aide à la décision</div>
-          <div className="text-sm text-muted-foreground max-w-2xl">
-            Lecture rapide + filtres + indicateurs (Total global = Solde initial + Période).
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-2 md:hidden">
-            <StatusBadge tone="accent">
-              Période : {formatDateForDisplay(exportFrom)} → {formatDateForDisplay(exportTo)}
-            </StatusBadge>
-            <StatusBadge tone="neutral">Membres: {selectedCountLabel}</StatusBadge>
-            <StatusBadge tone="success">
-              Total: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
-            </StatusBadge>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge tone="accent">
+            Période : {formatDateForDisplay(exportFrom)} → {formatDateForDisplay(exportTo)}
+          </StatusBadge>
+          <StatusBadge tone="neutral">Membres: {selectedCountLabel}</StatusBadge>
+          <StatusBadge tone="success">
+            Total global: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
+          </StatusBadge>
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center gap-2 md:justify-end">
-          <div className="hidden md:flex flex-wrap gap-2 items-center">
-            <StatusBadge tone="accent">
-              Période : {formatDateForDisplay(exportFrom)} → {formatDateForDisplay(exportTo)}
-            </StatusBadge>
-            <StatusBadge tone="neutral">Membres: {selectedCountLabel}</StatusBadge>
-            <StatusBadge tone="success">
-              Total global: <AnimatedNumber value={isDateRangeValid ? kpis.total : null} />
-            </StatusBadge>
-          </div>
-
           <Dialog open={exportOpen} onOpenChange={setExportOpen}>
             <DialogTrigger asChild>
               <Button variant="default" className="w-full md:w-auto">
@@ -1811,22 +1816,19 @@ export default function Insights() {
                 </div>
               </AnimatedSection>
 
-              <AnimatedSection delay={0.12} className="space-y-1 lg:w-[210px]">
+              <AnimatedSection delay={0.12} className="space-y-1 lg:w-[290px]">
                 <label className="text-xs font-medium text-muted-foreground">
                   Mode d’analyse
                 </label>
-                <Select
+                <Tabs
                   value={analysisMode}
                   onValueChange={(value) => setAnalysisMode(value as AnalysisMode)}
                 >
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="period">Période sélectionnée</SelectItem>
-                    <SelectItem value="global">Cumul global</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <TabsList className="grid h-9 w-full grid-cols-2">
+                    <TabsTrigger value="period">Période</TabsTrigger>
+                    <TabsTrigger value="global">Cumul global</TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </AnimatedSection>
 
               <div className="flex flex-wrap gap-2">
@@ -2017,6 +2019,7 @@ export default function Insights() {
                         />
                         <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                         <Tooltip
+                          cursor={chartTooltipCursor}
                           content={({ active, payload }) => {
                             const item = payload?.[0]?.payload as
                               | (typeof distributionData)[number]
@@ -2045,12 +2048,23 @@ export default function Insights() {
                         />
                         <Bar
                           dataKey="metric"
-                          fill="hsl(173, 58%, 39%)"
+                          fill={chartGlobal.secondary}
                           radius={[6, 6, 0, 0]}
                           isAnimationActive={!shouldReduceMotion}
                           animationDuration={shouldReduceMotion ? 0 : 600}
                           animationEasing="ease-out"
-                        />
+                        >
+                          {distributionDataForChart.map((item) => (
+                            <Cell
+                              key={item.memberId}
+                              fill={
+                                item.rank <= 3
+                                  ? rankAccent[item.rank as 1 | 2 | 3].fill
+                                  : chartGlobal.secondary
+                              }
+                            />
+                          ))}
+                        </Bar>
                         {distributionData.length > 0 && (
                           <ReferenceLine
                             y={averageTotal}
@@ -2074,21 +2088,48 @@ export default function Insights() {
               </div>
             </div>
 
-            {isMobile && distributionData.length > CHART_MOBILE_LIMIT && (
-              <div className="mt-2 flex items-center justify-between gap-2">
+            {distributionData.length > CHART_MOBILE_LIMIT && (
+              <div className="mt-3 flex flex-col gap-2 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-muted-foreground">
-                  {showAllChartsMobile
-                    ? `Affichage complet (${distributionData.length}).`
-                    : `${CHART_MOBILE_LIMIT} membres les moins chargés / les plus prioritaires.`}
+                  Top 10 affiché sur le graphique après le classement existant des {distributionData.length} membres.
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowAllChartsMobile((v) => !v)}
-                >
-                  {showAllChartsMobile ? "Top 10" : `Tout (${distributionData.length})`}
-                </Button>
+                <Dialog open={fullRankingOpen} onOpenChange={setFullRankingOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      Voir le classement complet
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>Classement complet — {analysisModeLabel}</DialogTitle>
+                    </DialogHeader>
+                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                      {distributionData.map((item) => (
+                        <div
+                          key={item.memberId}
+                          className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border bg-card/70 p-3"
+                        >
+                          {item.rank <= 3 ? (
+                            <span
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
+                              style={{ backgroundColor: rankAccent[item.rank as 1 | 2 | 3].fill }}
+                            >
+                              {item.rank}
+                            </span>
+                          ) : (
+                            <span className="text-sm font-semibold text-muted-foreground">n°{item.rank}</span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold">{item.fullName}</div>
+                            <div className="text-xs text-muted-foreground">{analysisModeLabel}</div>
+                          </div>
+                          <div className="font-bold tabular-nums text-priority">{item.metric}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             )}
 
@@ -2280,6 +2321,8 @@ export default function Insights() {
                         />
                         <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                         <Tooltip
+                          contentStyle={chartTooltipStyle}
+                          cursor={chartTooltipCursor}
                           formatter={(value: any, _name: any, props: any) => {
                             const p = props?.payload;
                             if (!p) return [value, analysisModeLabel];
@@ -2293,7 +2336,7 @@ export default function Insights() {
                         />
                         <Bar
                           dataKey="count"
-                          fill="#2563EB"
+                          fill={chartNormal.primary}
                           radius={[6, 6, 0, 0]}
                           isAnimationActive={!shouldReduceMotion}
                           animationDuration={shouldReduceMotion ? 0 : 600}
@@ -2301,17 +2344,18 @@ export default function Insights() {
                         />
                         <ReferenceLine
                           y={avgNormalGlobal}
-                          stroke="#111827"
-                          strokeWidth={3}
+                          stroke="hsl(var(--foreground))"
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
                           isAnimationActive={!shouldReduceMotion}
                           animationDuration={shouldReduceMotion ? 0 : 600}
                           animationEasing="ease-out"
                           label={{
                             value: `Moyenne: ${avgNormalGlobal.toFixed(1)}`,
                             position: "top",
-                            fill: "#111827",
-                            fontSize: 14,
-                            fontWeight: 700,
+                            fill: "hsl(var(--foreground))",
+                            fontSize: 12,
+                            fontWeight: 600,
                           }}
                         />
                       </BarChart>
@@ -2374,6 +2418,8 @@ export default function Insights() {
                         />
                         <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                         <Tooltip
+                          contentStyle={chartTooltipStyle}
+                          cursor={chartTooltipCursor}
                           formatter={(value: any, _name: any, props: any) => {
                             const p = props?.payload;
                             if (!p) return [value, analysisModeLabel];
@@ -2387,7 +2433,7 @@ export default function Insights() {
                         />
                         <Bar
                           dataKey="count"
-                          fill="#F97316"
+                          fill={chartHoliday.primary}
                           radius={[6, 6, 0, 0]}
                           isAnimationActive={!shouldReduceMotion}
                           animationDuration={shouldReduceMotion ? 0 : 600}
@@ -2395,17 +2441,18 @@ export default function Insights() {
                         />
                         <ReferenceLine
                           y={avgHolidayGlobal}
-                          stroke="#111827"
-                          strokeWidth={3}
+                          stroke="hsl(var(--foreground))"
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
                           isAnimationActive={!shouldReduceMotion}
                           animationDuration={shouldReduceMotion ? 0 : 600}
                           animationEasing="ease-out"
                           label={{
                             value: `Moyenne: ${avgHolidayGlobal.toFixed(1)}`,
                             position: "top",
-                            fill: "#111827",
-                            fontSize: 14,
-                            fontWeight: 700,
+                            fill: "hsl(var(--foreground))",
+                            fontSize: 12,
+                            fontWeight: 600,
                           }}
                         />
                       </BarChart>
@@ -2755,6 +2802,8 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(_value: any, _name: any, props: any) => {
                           const days = props?.payload?.days;
                           return [days === null ? "Jamais" : days, "Jours"];
@@ -2765,7 +2814,7 @@ export default function Insights() {
                       />
                       <Bar
                         dataKey="displayDays"
-                        fill="hsl(160, 60%, 45%)"
+                        fill={chartGlobal.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -2834,6 +2883,8 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(_value: any, _name: any, props: any) => {
                           const days = props?.payload?.days;
                           return [days === null ? "Jamais" : days, "Jours"];
@@ -2844,7 +2895,7 @@ export default function Insights() {
                       />
                       <Bar
                         dataKey="displayDays"
-                        fill="#2563EB"
+                        fill={chartNormal.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -2912,6 +2963,8 @@ export default function Insights() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(_value: any, _name: any, props: any) => {
                           const days = props?.payload?.days;
                           return [days === null ? "Jamais" : days, "Jours"];
@@ -2922,7 +2975,7 @@ export default function Insights() {
                       />
                       <Bar
                         dataKey="displayDays"
-                        fill="#F97316"
+                        fill={chartHoliday.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}

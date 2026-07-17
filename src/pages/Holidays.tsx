@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { LoadingState, EmptyState } from '@/components/shared';
+import { LoadingState, EmptyState, PageHeader } from '@/components/shared';
 import {
   Table,
   TableBody,
@@ -164,6 +164,14 @@ export default function Holidays() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        eyebrow="Calendrier"
+        title={fr.nav.holidays}
+        description="Jours fériés pris en compte dans les calculs de permanence."
+        icon={<Umbrella />}
+        accent="warning"
+      />
+
       <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         {isAdmin && (
           <div className="flex items-center gap-2">
@@ -274,7 +282,12 @@ export default function Holidays() {
             <StaggerItem key={month}>
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base capitalize">{month}</CardTitle>
+                  <CardTitle className="flex items-center gap-2 text-base capitalize">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-warning/10 text-warning">
+                      <CalendarIcon className="h-3.5 w-3.5" />
+                    </span>
+                    {month}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <Table>
@@ -299,7 +312,9 @@ export default function Holidays() {
                             </TableCell>
                             <TableCell>{holiday.label}</TableCell>
                             <TableCell>
-                              <Badge variant="secondary">{holiday.country}</Badge>
+                              <Badge variant="secondary" className="bg-info/10 text-info border-0">
+                                {holiday.country}
+                              </Badge>
                             </TableCell>
                             {isAdmin && (
                               <TableCell className="text-right">
@@ -318,7 +333,7 @@ export default function Holidays() {
                                       <AlertDialogCancel>{fr.common.cancel}</AlertDialogCancel>
                                       <AlertDialogAction
                                         onClick={() => handleDeleteHoliday(holiday.id)}
-                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                        className="bg-gradient-danger text-destructive-foreground shadow-sm shadow-destructive/20 hover:brightness-110"
                                       >
                                         {fr.common.delete}
                                       </AlertDialogAction>

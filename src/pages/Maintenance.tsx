@@ -312,8 +312,11 @@ export default function Maintenance() {
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header */}
       <PageHeader
+        eyebrow="Administration"
         title="Maintenance"
         description="Approbations, rôles, nettoyage et outils admin."
+        icon={<Shield />}
+        accent="primary"
         actions={
           <>
             <StatusBadge tone={pendingCount > 0 ? 'warning' : 'neutral'}>
@@ -331,8 +334,10 @@ export default function Maintenance() {
       <AnimatedSection>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserCheck className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-warning/10 text-warning">
+              <UserCheck className="h-4 w-4" />
+            </span>
             {fr.maintenance.pendingApprovals}
           </CardTitle>
         </CardHeader>
@@ -371,8 +376,10 @@ export default function Maintenance() {
       <AnimatedSection delay={0.08}>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Shield className="h-4 w-4" />
+            </span>
             Gestion des rôles (USER / ADMIN)
           </CardTitle>
         </CardHeader>
@@ -506,8 +513,10 @@ export default function Maintenance() {
       <AnimatedSection delay={0.16}>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+              <Trash2 className="h-4 w-4" />
+            </span>
             {fr.maintenance.cleanup}
           </CardTitle>
         </CardHeader>
@@ -537,8 +546,10 @@ export default function Maintenance() {
       <AnimatedSection delay={0.24}>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
+              <Sparkles className="h-4 w-4" />
+            </span>
             {fr.maintenance.seedHolidays}
           </CardTitle>
         </CardHeader>
@@ -575,7 +586,7 @@ export default function Maintenance() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={confirming}>{fr.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
-              className={confirmState?.destructive ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : undefined}
+              className={confirmState?.destructive ? 'bg-gradient-danger text-destructive-foreground shadow-sm shadow-destructive/20 hover:brightness-110' : undefined}
               disabled={confirming}
               onClick={async (event) => {
                 event.preventDefault();

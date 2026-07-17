@@ -430,8 +430,10 @@ for (const d of dates) {
       >
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarIcon className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <CalendarIcon className="h-4.5 w-4.5" />
+            </span>
             {fr.duty.add}
           </CardTitle>
         </CardHeader>
@@ -458,7 +460,8 @@ for (const d of dates) {
 {/* Week/Month options */}
 {mode !== 'day' && (
   <StaggerItem>
-  <div className="space-y-4 rounded-lg border p-4">
+  <div className="space-y-4 rounded-lg border bg-accent/[0.03] p-4">
+    <p className="text-xs font-semibold uppercase tracking-wide text-accent">Options de planification</p>
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">
         <Label>Personnes / jour</Label>

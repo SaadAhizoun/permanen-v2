@@ -32,13 +32,13 @@ export function EmptyState({ icon, title, description, action, className, floatI
               : undefined
           }
           aria-hidden="true"
-          className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:h-6 [&_svg]:w-6"
+          className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-muted to-muted/60 text-muted-foreground ring-1 ring-border/60 [&_svg]:h-6 [&_svg]:w-6"
         >
           {icon}
         </m.div>
       )}
       <p className="font-medium text-foreground">{title}</p>
-      {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
+      {description && <p className="max-w-sm text-sm text-muted-foreground leading-relaxed">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </m.div>
   );
