@@ -25,3 +25,6 @@ dist-ssr
 .env
 .env.*
 dist
+
+# Local audit/debug evidence — never committed
+.audit-screenshots/
