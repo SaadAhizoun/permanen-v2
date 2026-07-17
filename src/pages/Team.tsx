@@ -286,7 +286,7 @@ export default function Team() {
       />
 
       <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative w-full flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Rechercher un membre..."
@@ -322,7 +322,7 @@ export default function Team() {
 
               
 
-              <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Crédit initial (Normal)</Label>
                   <Input
@@ -362,7 +362,7 @@ export default function Team() {
       <AnimatedSection delay={0.08}>
       <Card>
         <CardContent className="p-0">
-          <Table>
+          <Table className="min-w-[640px] lg:min-w-full">
             <TableHeader>
               <TableRow>
                 <TableHead>{fr.team.fullName}</TableHead>

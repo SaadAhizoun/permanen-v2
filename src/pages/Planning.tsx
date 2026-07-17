@@ -162,7 +162,7 @@ export default function Planning() {
     <div className="space-y-6">
       {/* Header */}
       <AnimatedSection className="surface-elevated flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-4 py-4 sm:px-5">
-        <div className="flex items-center gap-3">
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:w-auto sm:justify-start sm:gap-3">
           <span className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
             <Calendar className="h-5 w-5" />
           </span>
@@ -173,7 +173,7 @@ export default function Planning() {
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <h2 className="text-xl font-semibold min-w-[160px] sm:min-w-[200px] text-center capitalize">
+          <h2 className="min-w-0 flex-1 text-center text-lg font-semibold capitalize sm:min-w-[200px] sm:flex-none sm:text-xl">
             {format(currentMonth, 'MMMM yyyy', { locale: frLocale })}
           </h2>
           <Button
@@ -185,9 +185,10 @@ export default function Planning() {
           </Button>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex w-full gap-2 sm:w-auto">
           <Button
   variant="outline"
+  className="w-full sm:w-auto"
   onClick={() => {
     if (!isAdmin) {
       toast.error('Action réservée aux administrateurs');
@@ -206,7 +207,7 @@ export default function Planning() {
       {/* Calendar Grid */}
       <AnimatedSection delay={0.06}>
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-2 sm:p-4">
           {/* Weekday Headers */}
           <div className="grid grid-cols-7 gap-1 mb-2">
             {weekDays.map((day) => (
@@ -290,7 +291,7 @@ export default function Planning() {
                     </m.button>
                   </SheetTrigger>
 
-                  <SheetContent>
+                  <SheetContent className="h-[100dvh] max-h-[100dvh] w-[87vw] max-w-[340px] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:max-w-sm">
                     <SheetHeader>
                       <SheetTitle className="flex items-center gap-2.5">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">

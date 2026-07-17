@@ -366,7 +366,7 @@ export default function Dashboard() {
               }
             />
           ) : (
-            <Table>
+            <Table className="min-w-[520px] md:min-w-full">
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>

@@ -456,7 +456,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             />
           </label>
 
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <AnimatePresence>
               {file && (
                 <m.div
@@ -465,9 +465,9 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   exit={{ opacity: 0, scale: 0.9 }}
                   transition={{ duration: 0.2, ease: premiumEase }}
                 >
-                  <Badge variant="secondary">
+                  <Badge variant="secondary" className="max-w-full overflow-hidden">
                     <FileSpreadsheet className="h-4 w-4 mr-1" />
-                    {file.name}
+                    <span className="truncate">{file.name}</span>
                   </Badge>
                 </m.div>
               )}
@@ -488,7 +488,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
               </span>
               {fr.import.mapping}
             </CardTitle>
-            <div className="flex gap-2 mt-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => applyPreset('coordination')}>
                 {fr.import.coordinationPreset}
               </Button>
@@ -586,7 +586,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                 {fr.import.preview} ({rows.length} lignes)
               </h4>
               <div className="max-h-40 overflow-auto rounded-lg border">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[640px] text-sm">
                   <thead className="bg-muted sticky top-0">
                     <tr>
                       {headers.map((h, i) => (
@@ -635,7 +635,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <StaggerContainer className="grid grid-cols-3 gap-3 sm:gap-4">
+            <StaggerContainer className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
               <StaggerItem>
               <div className="text-center p-3 sm:p-4 rounded-xl border bg-success/10 border-success/20">
                 <Check className="h-6 w-6 sm:h-8 sm:w-8 mx-auto text-success mb-2" />
@@ -667,7 +667,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
 
             {result.errors.length > 0 ? (
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h4 className="font-medium">Détail des erreurs</h4>
                   <Button variant="outline" size="sm" onClick={downloadErrors}>
                     <Download className="h-4 w-4 mr-2" />
@@ -675,7 +675,7 @@ const notesIdx = notesColumn && notesColumn !== '__ignore__' ? headers.indexOf(n
                   </Button>
                 </div>
                 <div className="max-h-40 overflow-auto rounded-lg border">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[520px] text-sm">
                     <thead className="bg-muted sticky top-0">
                       <tr>
                         <th className="text-left p-2">Date</th>

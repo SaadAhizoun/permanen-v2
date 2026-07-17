@@ -174,9 +174,9 @@ export default function Holidays() {
 
       <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         {isAdmin && (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Select value={String(seedYear)} onValueChange={(v) => setSeedYear(parseInt(v))}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-full sm:w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -290,7 +290,7 @@ export default function Holidays() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <Table>
+            <Table className="min-w-[560px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>{fr.holidays.date}</TableHead>
