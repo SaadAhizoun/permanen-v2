@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LoadingState, EmptyState, StatusBadge } from "@/components/shared";
+import { LoadingState, EmptyState, StatusBadge, PageHeader, StatCard } from "@/components/shared";
 
 import {
   Table,
@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { Filter, RefreshCw, Search } from "lucide-react";
+import { History as HistoryIcon, Filter, RefreshCw, Search, BarChart3, CalendarDays, Umbrella, Clock, ListChecks, FolderOpen } from "lucide-react";
 
 import {
   BarChart,
@@ -30,6 +30,8 @@ import {
 } from "recharts";
 
 import { differenceInCalendarDays, format } from "date-fns";
+import { fr } from "@/lib/i18n";
+import { chartGlobal, chartNormal, chartHoliday } from "@/lib/chartColors";
 
 import {
   AnimatedList,
@@ -37,7 +39,6 @@ import {
   AnimatedPresencePanel,
   AnimatedSection,
   StaggerContainer,
-  StaggerItem,
 } from "@/components/motion";
 
 // ---------------- Types ----------------
@@ -86,6 +87,16 @@ function formatFrFromYYYYMMDD(dateStr: string) {
 }
 
 const CHART_MOBILE_LIMIT = 10;
+
+const chartTooltipStyle = {
+  backgroundColor: "hsl(var(--popover))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: 10,
+  fontSize: 12,
+  color: "hsl(var(--popover-foreground))",
+};
+
+const chartTooltipCursor = { fill: "hsl(var(--muted))", opacity: 0.4 };
 
 function useIsMobile(breakpointPx = 768) {
   const [isMobile, setIsMobile] = useState(false);
@@ -492,29 +503,27 @@ export default function History() {
 
   return (
     <div className="space-y-6">
-      <AnimatedSection className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-1">
-          <div className="text-xl md:text-2xl font-bold">Historique — Permanences</div>
-          <div className="text-sm text-muted-foreground">
-            Vue “work-log” (période + membres) — <b>sans solde initial</b>.
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-2 md:hidden">
-            <Badge variant="secondary">
-              Période: {clampDateStr(periodFrom)} → {clampDateStr(periodTo)}
-            </Badge>
-            <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
-            <Badge variant="outline">Total: {kpis.total}</Badge>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+      <PageHeader
+        eyebrow="Historique"
+        title={fr.nav.history}
+        description="Vue chronologique par période et par membre, sans solde initial."
+        icon={<HistoryIcon />}
+        accent="info"
+        actions={
           <Button variant="outline" onClick={fetchAll}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Actualiser
           </Button>
-        </div>
-      </AnimatedSection>
+        }
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="secondary">
+          Période: {`${clampDateStr(periodFrom)} → ${clampDateStr(periodTo)}`}
+        </Badge>
+        <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
+        <Badge variant="outline">Total: {kpis.total}</Badge>
+      </div>
 
       <AnimatedSection delay={0.06}>
       <Card className="md:sticky md:top-2 z-10">
@@ -647,59 +656,43 @@ export default function History() {
       </AnimatedSection>
 
       <StaggerContainer className="grid gap-3 grid-cols-2 md:grid-cols-4">
-        <StaggerItem>
-        <Card>
-          <CardContent className="py-4 md:py-5">
-            <div className="text-sm text-muted-foreground">Total (période)</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
-              <AnimatedNumber value={kpis.total} />
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {clampDateStr(periodFrom)} → {clampDateStr(periodTo)}
-            </div>
-          </CardContent>
-        </Card>
-        </StaggerItem>
-
-        <StaggerItem>
-        <Card>
-          <CardContent className="py-4 md:py-5">
-            <div className="text-sm text-muted-foreground">Jours normaux</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
-              <AnimatedNumber value={kpis.normal} />
-            </div>
-          </CardContent>
-        </Card>
-        </StaggerItem>
-
-        <StaggerItem>
-        <Card>
-          <CardContent className="py-4 md:py-5">
-            <div className="text-sm text-muted-foreground">Jours fériés</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
-              <AnimatedNumber value={kpis.holiday} />
-            </div>
-          </CardContent>
-        </Card>
-        </StaggerItem>
-
-        <StaggerItem>
-        <Card>
-          <CardContent className="py-4 md:py-5">
-            <div className="text-sm text-muted-foreground">Moyenne / membre</div>
-            <div className="text-2xl md:text-3xl font-bold mt-1 tabular-nums">
-              <AnimatedNumber value={kpis.avg} format={(v) => v.toFixed(1)} />
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">sur la période</div>
-          </CardContent>
-        </Card>
-        </StaggerItem>
+        <StatCard
+          accent="primary"
+          label="Total (période)"
+          icon={<BarChart3 />}
+          value={<AnimatedNumber value={kpis.total} />}
+          secondary={clampDateStr(periodFrom) + " - " + clampDateStr(periodTo)}
+        />
+        <StatCard
+          accent="info"
+          label="Jours normaux"
+          icon={<CalendarDays />}
+          value={<AnimatedNumber value={kpis.normal} />}
+        />
+        <StatCard
+          accent="warning"
+          label="Jours fériés"
+          icon={<Umbrella />}
+          value={<AnimatedNumber value={kpis.holiday} />}
+        />
+        <StatCard
+          accent="accent"
+          label="Moyenne / membre"
+          icon={<Clock />}
+          value={<AnimatedNumber value={kpis.avg} format={(v) => v.toFixed(1)} />}
+          secondary="sur la période"
+        />
       </StaggerContainer>
 
       <AnimatedSection delay={0.12} className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Répartition par membre — Total (période)</CardTitle>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <BarChart3 className="h-4 w-4" />
+              </span>
+              Répartition par membre — Total (période)
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -724,6 +717,8 @@ export default function History() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(value: any) => [`${value}`, "Total (période)"]}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
@@ -731,7 +726,7 @@ export default function History() {
                       />
                       <Bar
                         dataKey="total"
-                        fill="hsl(173, 58%, 39%)"
+                        fill={chartGlobal.secondary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -739,14 +734,15 @@ export default function History() {
                       />
                       <ReferenceLine
                         y={avgTotal}
-                        stroke="#111827"
-                        strokeWidth={3}
+                        stroke="hsl(var(--foreground))"
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
                         label={{
                           value: `Moyenne: ${avgTotal.toFixed(1)}`,
                           position: "top",
-                          fill: "#111827",
-                          fontSize: 14,
-                          fontWeight: 700,
+                          fill: "hsl(var(--foreground))",
+                          fontSize: 12,
+                          fontWeight: 600,
                         }}
                       />
                     </BarChart>
@@ -777,7 +773,12 @@ export default function History() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Comparatif — Jours normaux (période)</CardTitle>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
+                <CalendarDays className="h-4 w-4" />
+              </span>
+              Comparatif — Jours normaux (période)
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -802,6 +803,8 @@ export default function History() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(value: any) => [`${value}`, "Jours normaux"]}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
@@ -809,7 +812,7 @@ export default function History() {
                       />
                       <Bar
                         dataKey="count"
-                        fill="#2563EB"
+                        fill={chartNormal.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -817,14 +820,15 @@ export default function History() {
                       />
                       <ReferenceLine
                         y={avgNormal}
-                        stroke="#111827"
-                        strokeWidth={3}
+                        stroke="hsl(var(--foreground))"
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
                         label={{
                           value: `Moyenne: ${avgNormal.toFixed(1)}`,
                           position: "top",
-                          fill: "#111827",
-                          fontSize: 14,
-                          fontWeight: 700,
+                          fill: "hsl(var(--foreground))",
+                          fontSize: 12,
+                          fontWeight: 600,
                         }}
                       />
                     </BarChart>
@@ -855,7 +859,12 @@ export default function History() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Comparatif — Jours fériés (période)</CardTitle>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-warning/10 text-warning">
+                <Umbrella className="h-4 w-4" />
+              </span>
+              Comparatif — Jours fériés (période)
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -880,6 +889,8 @@ export default function History() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(value: any) => [`${value}`, "Jours fériés"]}
                         labelFormatter={(_label: any, payload: any) =>
                           payload?.[0]?.payload?.fullName ?? _label
@@ -887,7 +898,7 @@ export default function History() {
                       />
                       <Bar
                         dataKey="count"
-                        fill="#F97316"
+                        fill={chartHoliday.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -895,14 +906,15 @@ export default function History() {
                       />
                       <ReferenceLine
                         y={avgHoliday}
-                        stroke="#111827"
-                        strokeWidth={3}
+                        stroke="hsl(var(--foreground))"
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
                         label={{
                           value: `Moyenne: ${avgHoliday.toFixed(1)}`,
                           position: "top",
-                          fill: "#111827",
-                          fontSize: 14,
-                          fontWeight: 700,
+                          fill: "hsl(var(--foreground))",
+                          fontSize: 12,
+                          fontWeight: 600,
                         }}
                       />
                     </BarChart>
@@ -933,7 +945,12 @@ export default function History() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Days since last duty</CardTitle>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                <Clock className="h-4 w-4" />
+              </span>
+              Jours depuis la dernière permanence
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -958,6 +975,8 @@ export default function History() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(value: any, _name: any, props: any) => {
                           const hasValue = props?.payload?.hasValue;
                           if (!hasValue) return ["Jamais", "Jours"];
@@ -969,7 +988,7 @@ export default function History() {
                       />
                       <Bar
                         dataKey="days"
-                        fill="hsl(160, 60%, 45%)"
+                        fill={chartGlobal.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -989,7 +1008,12 @@ export default function History() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Days since last NORMAL duty</CardTitle>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
+                <Clock className="h-4 w-4" />
+              </span>
+              Jours depuis la dernière permanence normale
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -1014,6 +1038,8 @@ export default function History() {
                       />
                       <YAxis width={isMobile ? 28 : 40} fontSize={12} />
                       <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={chartTooltipCursor}
                         formatter={(value: any, _name: any, props: any) => {
                           const hasValue = props?.payload?.hasValue;
                           if (!hasValue) return ["Jamais", "Jours"];
@@ -1025,7 +1051,7 @@ export default function History() {
                       />
                       <Bar
                         dataKey="days"
-                        fill="#2563EB"
+                        fill={chartNormal.primary}
                         radius={[6, 6, 0, 0]}
                         isAnimationActive={!shouldReduceMotion}
                         animationDuration={shouldReduceMotion ? 0 : 600}
@@ -1043,7 +1069,12 @@ export default function History() {
       <AnimatedSection delay={0.16}>
       <Card>
         <CardHeader>
-          <CardTitle>Résumé — Par membre</CardTitle>
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <ListChecks className="h-4.5 w-4.5" />
+            </span>
+            Résumé — Par membre
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -1129,7 +1160,12 @@ export default function History() {
       <AnimatedSection delay={0.2}>
       <Card>
         <CardHeader>
-          <CardTitle>Jours travaillés — Détails par membre</CardTitle>
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <FolderOpen className="h-4.5 w-4.5" />
+            </span>
+            Jours travaillés — Détails par membre
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import { fr } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageTransition, StaggerContainer, StaggerItem } from '@/components/motion';
+import { AppBackground } from '@/components/shared';
 import {
   LayoutDashboard,
   Calendar,
@@ -81,20 +82,27 @@ export default function AppLayout() {
           onClick={() => setMobileOpen(false)}
           aria-current={isActive ? 'page' : undefined}
           className={cn(
-            'relative flex items-center gap-3 min-h-[44px] px-3 py-2.5 rounded-lg transition-colors duration-component ease-standard text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50',
-            isActive && 'bg-sidebar-accent text-sidebar-foreground font-medium',
+            'relative flex items-center gap-3 min-h-[44px] px-3 py-2.5 rounded-xl transition-colors duration-component ease-standard text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-white/5',
+            isActive && 'text-sidebar-foreground font-medium',
             sidebarCollapsed && 'justify-center px-2'
           )}
         >
           {isActive && (
             <m.span
               layoutId="active-navigation-indicator"
-              className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary"
+              className="absolute inset-0 rounded-xl border border-sidebar-primary/25 bg-gradient-to-r from-sidebar-primary/20 via-sidebar-primary/10 to-transparent"
               transition={shouldReduceMotion ? { duration: 0.01 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             />
           )}
-          <Icon className="w-5 h-5 flex-shrink-0" />
-          {!sidebarCollapsed && <span className="truncate">{label}</span>}
+          <span
+            className={cn(
+              'relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-component',
+              isActive ? 'bg-sidebar-primary/20 text-sidebar-primary' : 'text-sidebar-foreground/55'
+            )}
+          >
+            <Icon className="w-4 h-4" />
+          </span>
+          {!sidebarCollapsed && <span className="relative z-10 truncate">{label}</span>}
         </NavLink>
       </m.div>
     );
@@ -104,19 +112,22 @@ export default function AppLayout() {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className={cn(
-        'flex items-center gap-1 px-1 py-6 border-b border-sidebar-border',
+        'flex items-center gap-2.5 px-3 py-5 border-b border-sidebar-border/70',
         sidebarCollapsed && 'justify-center px-2'
       )}>
-        <img
-  src="/logo.png"
-  alt="Permanences"
-  className="w-16 h-16 rounded-xl flex-shrink-0"
-/>
+        <div className="relative shrink-0">
+          <div className="absolute inset-0 rounded-xl bg-sidebar-primary/30 blur-md" aria-hidden="true" />
+          <img
+            src="/logo.png"
+            alt="Permanences"
+            className="relative w-11 h-11 rounded-xl ring-1 ring-white/10"
+          />
+        </div>
 
         {!sidebarCollapsed && (
           <div className="truncate">
-            <h1 className="font-bold text-sidebar-foreground">Permanen</h1>
-            <p className="text-xs text-sidebar-foreground/60">V2+</p>
+            <h1 className="font-bold leading-tight text-sidebar-foreground">Permanen</h1>
+            <p className="text-[11px] font-medium tracking-wide text-sidebar-primary/80">V2+ · Gestion</p>
           </div>
         )}
       </div>
@@ -132,14 +143,16 @@ export default function AppLayout() {
         {isAdmin && (
           <>
             <div className={cn(
-              'pt-4 pb-2',
-              !sidebarCollapsed && 'px-3'
+              'mt-4 mb-2 flex items-center gap-2',
+              !sidebarCollapsed ? 'px-3' : 'justify-center'
             )}>
+              <div className="h-px flex-1 bg-sidebar-border/70" />
               {!sidebarCollapsed && (
-                <span className="text-xs font-medium text-sidebar-foreground/50 uppercase tracking-wider">
+                <span className="text-[10px] font-semibold text-sidebar-foreground/45 uppercase tracking-wider">
                   Admin
                 </span>
               )}
+              <div className="h-px flex-1 bg-sidebar-border/70" />
             </div>
             {adminItems.map((item) => (
               <StaggerItem key={item.to}>
@@ -151,12 +164,12 @@ export default function AppLayout() {
       </StaggerContainer>
 
       {/* Collapse Button (Desktop) */}
-      <div className="hidden lg:flex px-3 py-2 border-t border-sidebar-border">
+      <div className="hidden lg:flex px-3 py-2 border-t border-sidebar-border/70">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+          className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-white/5"
         >
           <ChevronLeft className={cn(
             'w-4 h-4 transition-transform',
@@ -169,7 +182,8 @@ export default function AppLayout() {
   );
 
   return (
-    <div className="min-h-screen flex w-full bg-background">
+    <div className="relative min-h-screen flex w-full bg-background">
+      <AppBackground variant="shell" />
       {/* Desktop Sidebar */}
       <m.aside
         animate={{ width: sidebarCollapsed ? 64 : 256 }}
@@ -189,7 +203,7 @@ export default function AppLayout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <header className="h-16 border-b bg-card/70 backdrop-blur-sm flex items-center justify-between gap-3 px-4 lg:px-6 sticky top-0 z-10">
+        <header className="h-16 border-b bg-card/70 backdrop-blur-md flex items-center justify-between gap-3 px-4 lg:px-6 sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-2 min-w-0 sm:gap-4">
             {/* Mobile Menu Button */}
             <Button
@@ -215,8 +229,8 @@ export default function AppLayout() {
             <Badge
   variant="secondary"
   className={cn(
-    "hidden sm:flex",
-    isAdmin ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+    "hidden sm:flex border-0",
+    isAdmin ? "bg-gradient-primary text-primary-foreground shadow-sm" : "bg-muted text-foreground"
   )}
 >
   {isAdmin ? "Admin" : "Utilisateur"}

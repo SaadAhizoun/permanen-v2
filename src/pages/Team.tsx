@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { LoadingState, EmptyState, StatusBadge } from '@/components/shared';
+import { LoadingState, EmptyState, StatusBadge, PageHeader } from '@/components/shared';
 import {
   Table,
   TableBody,
@@ -277,6 +277,14 @@ export default function Team() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        eyebrow="Gestion d'équipe"
+        title={fr.nav.team}
+        description="Membres, crédits initiaux et statut d'activité."
+        icon={<Users />}
+        accent="info"
+      />
+
       <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -390,11 +398,26 @@ export default function Team() {
                   renderItem={(member) => (
                     <>
                       <TableCell>
-                        <div>
-                          <span className="font-medium">{member.full_name}</span>
-                          {member.email && (
-                            <span className="text-muted-foreground text-sm block">{member.email}</span>
-                          )}
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                              member.active
+                                ? 'bg-success/10 text-success'
+                                : 'bg-muted text-muted-foreground'
+                            }`}
+                          >
+                            {member.full_name
+                              .split(/\s+/)
+                              .slice(0, 2)
+                              .map((part) => part[0]?.toUpperCase())
+                              .join('')}
+                          </span>
+                          <div className="min-w-0">
+                            <span className="font-medium block truncate">{member.full_name}</span>
+                            {member.email && (
+                              <span className="text-muted-foreground text-sm block truncate">{member.email}</span>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
 
@@ -449,7 +472,7 @@ export default function Team() {
                                   <AlertDialogCancel>{fr.common.cancel}</AlertDialogCancel>
                                   <AlertDialogAction
                                     onClick={() => handleDelete(member.id)}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    className="bg-gradient-danger text-destructive-foreground shadow-sm shadow-destructive/20 hover:brightness-110"
                                   >
                                     {fr.common.delete}
                                   </AlertDialogAction>

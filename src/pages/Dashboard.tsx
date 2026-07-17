@@ -208,6 +208,7 @@ export default function Dashboard() {
       {/* KPI Cards */}
       <StaggerContainer className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
+          accent="info"
           label={fr.dashboard.nextDuty}
           icon={<Calendar />}
           value={
@@ -220,6 +221,7 @@ export default function Dashboard() {
         />
 
         <StatCard
+          accent="primary"
           label={fr.dashboard.totalDuties}
           icon={<Users />}
           value={<AnimatedNumber value={kpis.monthTotal} />}
@@ -227,6 +229,9 @@ export default function Dashboard() {
         />
 
         <StatCard
+          accent={
+            kpis.fairnessScore >= 80 ? 'success' : kpis.fairnessScore >= 60 ? 'accent' : kpis.fairnessScore >= 40 ? 'warning' : 'danger'
+          }
           label={fr.dashboard.fairness}
           icon={<BarChart3 />}
           value={<AnimatedNumber value={kpis.fairnessScore} format={(v) => `${Math.round(v)}%`} />}
@@ -236,6 +241,7 @@ export default function Dashboard() {
 
         {isAdmin ? (
           <StatCard
+            accent={kpis.pendingApprovals > 0 ? 'warning' : 'neutral'}
             label={fr.dashboard.pendingApprovals}
             icon={<UserCheck />}
             value={<AnimatedNumber value={kpis.pendingApprovals} />}
@@ -251,6 +257,7 @@ export default function Dashboard() {
           />
         ) : (
           <StatCard
+            accent={kpis.conflicts === 0 ? 'success' : 'danger'}
             label={fr.dashboard.conflicts}
             icon={<AlertTriangle />}
             value={<AnimatedNumber value={kpis.conflicts} />}

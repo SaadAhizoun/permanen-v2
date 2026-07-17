@@ -161,8 +161,11 @@ export default function Planning() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <AnimatedSection className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="flex items-center gap-4">
+      <AnimatedSection className="surface-elevated flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-4 py-4 sm:px-5">
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+            <Calendar className="h-5 w-5" />
+          </span>
           <Button
             variant="outline"
             size="icon"
@@ -170,7 +173,7 @@ export default function Planning() {
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <h2 className="text-xl font-semibold min-w-[200px] text-center">
+          <h2 className="text-xl font-semibold min-w-[160px] sm:min-w-[200px] text-center capitalize">
             {format(currentMonth, 'MMMM yyyy', { locale: frLocale })}
           </h2>
           <Button
@@ -272,7 +275,7 @@ export default function Planning() {
                               'text-xs px-1.5 py-0.5 rounded truncate',
                               duty.team_member?.active === false
                                 ? 'bg-destructive/10 text-destructive'
-                                : 'bg-accent/20 text-blue-900 font-bold'
+                                : 'bg-accent/20 text-accent font-bold'
                             )}
                           >
                             {duty.team_member?.full_name || 'Non assigné'}
@@ -289,9 +292,13 @@ export default function Planning() {
 
                   <SheetContent>
                     <SheetHeader>
-                      <SheetTitle className="flex items-center gap-2">
-                        <Calendar className="h-5 w-5" />
-                        {format(day, 'EEEE d MMMM yyyy', { locale: frLocale })}
+                      <SheetTitle className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
+                          <Calendar className="h-4 w-4" />
+                        </span>
+                        <span className="capitalize">
+                          {format(day, 'EEEE d MMMM yyyy', { locale: frLocale })}
+                        </span>
                       </SheetTitle>
                     </SheetHeader>
 
