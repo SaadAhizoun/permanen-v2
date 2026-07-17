@@ -22,7 +22,6 @@ import {
   Wrench,
   LogOut,
   Menu,
-  X,
   ChevronLeft,
 } from 'lucide-react';
 import {
@@ -34,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: fr.nav.dashboard },
@@ -195,7 +194,15 @@ export default function AppLayout() {
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="p-0 w-[280px] max-w-[85vw] bg-sidebar border-sidebar-border">
+        <SheetContent
+          side="left"
+          aria-describedby={undefined}
+          overlayClassName="bg-foreground/55 backdrop-blur-[2px]"
+          closeButtonClassName="top-[calc(env(safe-area-inset-top)+0.5rem)] bg-sidebar-accent text-sidebar-foreground opacity-100 ring-offset-sidebar data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground hover:data-[state=open]:bg-sidebar-primary/20 hover:data-[state=open]:text-sidebar-primary focus:ring-sidebar-ring"
+          closeLabel="Fermer le menu de navigation"
+          className="h-[100dvh] max-h-[100dvh] w-[87vw] max-w-[340px] overflow-hidden border-sidebar-border bg-sidebar bg-none p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-sidebar-foreground sm:max-w-[340px]"
+        >
+          <SheetTitle className="sr-only text-sidebar-foreground">Navigation principale</SheetTitle>
           <SidebarContent />
         </SheetContent>
       </Sheet>
@@ -271,7 +278,7 @@ export default function AppLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-4 lg:p-6 overflow-auto">
+        <main className="min-w-0 flex-1 overflow-auto overflow-x-hidden p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 lg:p-6">
           <AnimatePresence mode="wait" initial={false}>
             <PageTransition transitionKey={location.pathname}>
               <Outlet />

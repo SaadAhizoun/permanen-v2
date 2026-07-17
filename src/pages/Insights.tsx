@@ -2468,7 +2468,7 @@ export default function Insights() {
                   Voir le classement complet
                 </Button>
               </DialogTrigger>
-              <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-5xl">
+              <DialogContent className="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:h-auto sm:max-h-[90vh] sm:max-w-5xl">
                 <DialogHeader>
                   <DialogTitle>Classement complet — {decisionCategoryLabel}</DialogTitle>
                   <p className="text-sm text-muted-foreground">

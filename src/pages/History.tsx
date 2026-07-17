@@ -518,7 +518,7 @@ export default function History() {
       />
 
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary">
+        <Badge variant="secondary" className="max-w-full whitespace-normal break-words">
           Période: {`${clampDateStr(periodFrom)} → ${clampDateStr(periodTo)}`}
         </Badge>
         <Badge variant="outline">Membres: {selectedCountLabel}</Badge>
@@ -528,7 +528,7 @@ export default function History() {
       <AnimatedSection delay={0.06}>
       <Card className="md:sticky md:top-2 z-10">
         <CardContent className="py-4">
-          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Button
               type="button"
               variant="ghost"
@@ -558,14 +558,14 @@ export default function History() {
               {filterOpen ? "Fermer" : "Choisir des membres"}
             </Button>
 
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end">
               <div className="space-y-1">
                 <div className="text-[11px] text-muted-foreground">Du</div>
                 <Input
                   type="date"
                   value={periodFrom}
                   onChange={(e) => setPeriodFrom(e.target.value)}
-                  className="w-[160px]"
+                  className="w-full sm:w-[160px]"
                 />
               </div>
 
@@ -575,7 +575,7 @@ export default function History() {
                   type="date"
                   value={periodTo}
                   onChange={(e) => setPeriodTo(e.target.value)}
-                  className="w-[160px]"
+                  className="w-full sm:w-[160px]"
                 />
               </div>
 
@@ -604,7 +604,7 @@ export default function History() {
               </Button>
             </div>
 
-            <div className="ml-auto flex flex-wrap gap-2">
+            <div className="flex w-full flex-wrap gap-2 sm:ml-auto sm:w-auto">
               <Badge variant="secondary">Normal: {kpis.normal}</Badge>
               <Badge variant="secondary">Férié: {kpis.holiday}</Badge>
               <Badge variant="secondary">Total: {kpis.total}</Badge>
@@ -1102,7 +1102,7 @@ export default function History() {
           </div>
 
           <div className="w-full rounded-xl border bg-background overflow-auto">
-            <Table>
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Membre</TableHead>

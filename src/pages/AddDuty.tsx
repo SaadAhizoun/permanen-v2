@@ -462,7 +462,7 @@ for (const d of dates) {
   <StaggerItem>
   <div className="space-y-4 rounded-lg border bg-accent/[0.03] p-4">
     <p className="text-xs font-semibold uppercase tracking-wide text-accent">Options de planification</p>
-    <div className="grid grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div className="space-y-2">
         <Label>Personnes / jour</Label>
         <Input
@@ -519,7 +519,7 @@ for (const d of dates) {
       </div>
     </div>
 
-    <div className="flex justify-between items-center">
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
       <Button type="button" variant="outline" onClick={refreshRecommendations} disabled={loadingRecs}>
         {loadingRecs ? 'Analyse...' : '🤖 Suggérer (IA)'}
       </Button>
@@ -676,11 +676,11 @@ for (const d of dates) {
 
             {/* Submit */}
             <StaggerItem>
-            <div className="flex gap-3 pt-4">
+            <div className="flex flex-col gap-3 pt-4 sm:flex-row">
               <Button
                 type="submit"
                 disabled={loading || duplicateError || (holidayWarning && !isAdmin && !holidayOverride)}
-                className="flex-1"
+                className="w-full flex-1"
               >
                 <Save className="mr-2 h-4 w-4" />
                 {loading ? 'Enregistrement...' : fr.common.save}
@@ -689,6 +689,7 @@ for (const d of dates) {
                 type="button"
                 variant="outline"
                 onClick={() => navigate('/planning')}
+                className="w-full sm:w-auto"
               >
                 {fr.common.cancel}
               </Button>
